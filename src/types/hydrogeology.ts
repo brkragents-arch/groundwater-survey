@@ -12,17 +12,7 @@ export type PathwayType =
   | 'inferred_fracture'
   | 'palaeochannel'
   | 'lineament_intersection'
-  | 'subsurface_flow'
-  | 'sub_pathway'
-  | 'recharge_zone';
-
-export interface SubsurfaceFlowContour {
-  id: string;
-  elevationM: number; // Water table / hydraulic head elevation (AMSL)
-  depthBglM: number; // Depth below ground surface (m bgl)
-  isIndexContour: boolean; // Major index contour (e.g. every 10m or 5m)
-  coordinates: [number, number][]; // Line coordinates [lat, lng]
-}
+  | 'subsurface_flow';
 
 export interface BranchingPathway {
   id: string;
@@ -37,6 +27,32 @@ export interface BranchingPathway {
   depthToWaterM?: number;
   flowDirectionDeg?: number;
   darcyFluxM3PerDay?: number;
+  isSubPathway?: boolean;
+  parentBranchId?: string;
+}
+
+export interface RechargeZone {
+  id: string;
+  name: string;
+  rechargeType: 'topographic_depression' | 'permeable_alluvial_swale' | 'fracture_intersection_sink' | 'riparian_infiltration_buffer';
+  coordinates: [number, number][]; // Polygon coordinates
+  center: [number, number];
+  infiltrationRateMmHr: number;
+  areaHectares: number;
+  annualRechargePotentialM3: number;
+  description: string;
+  soilInfiltrationCapacity: string;
+}
+
+export interface GroundwaterPotentialCell {
+  lat: number;
+  lng: number;
+  score: number; // 0 - 100
+  potentialClass: PotentialClass;
+  elevation: number;
+  slopeDeg: number;
+  flowAccumulation: number;
+  depthToWaterM: number;
 }
 
 export interface BorewellCandidate {

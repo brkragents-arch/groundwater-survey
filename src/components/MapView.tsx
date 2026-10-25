@@ -6,7 +6,8 @@ import {
   SurveyBoundary,
   HistoricalWellRecord,
   CadastralParcel,
-  SubsurfaceFlowContour,
+  RechargeZone,
+  GroundwaterPotentialCell,
 } from '../types/hydrogeology';
 import {
   Layers,
@@ -21,13 +22,15 @@ import {
   Maximize2,
   ChevronDown,
   ChevronUp,
+  Droplets,
+  Activity,
+  Flame,
 } from 'lucide-react';
 
 interface MapViewProps {
   boundary: SurveyBoundary;
   candidates: BorewellCandidate[];
   pathways: BranchingPathway[];
-  contours?: SubsurfaceFlowContour[];
   cadastralParcels: CadastralParcel[];
   selectedCandidateId: string | null;
   onSelectCandidate: (id: string) => void;
@@ -35,13 +38,14 @@ interface MapViewProps {
   isDrawingMode: boolean;
   onPolygonDrawn: (coords: [number, number][]) => void;
   onCancelDraw: () => void;
+  rechargeZones?: RechargeZone[];
+  groundwaterPotentialGrid?: GroundwaterPotentialCell[][];
 }
 
 export const MapView: React.FC<MapViewProps> = ({
   boundary,
   candidates,
   pathways,
-  contours = [],
   cadastralParcels,
   selectedCandidateId,
   onSelectCandidate,
@@ -49,6 +53,8 @@ export const MapView: React.FC<MapViewProps> = ({
   isDrawingMode,
   onPolygonDrawn,
   onCancelDraw,
+  rechargeZones = [],
+  groundwaterPotentialGrid = [],
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -57,19 +63,21 @@ export const MapView: React.FC<MapViewProps> = ({
   const boundaryLayerRef = useRef<L.LayerGroup | null>(null);
   const cadastralLayerRef = useRef<L.LayerGroup | null>(null);
   const pathwaysLayerRef = useRef<L.LayerGroup | null>(null);
-  const contoursLayerRef = useRef<L.LayerGroup | null>(null);
   const candidatesLayerRef = useRef<L.LayerGroup | null>(null);
   const wellsLayerRef = useRef<L.LayerGroup | null>(null);
   const drawLayerRef = useRef<L.LayerGroup | null>(null);
+  const rechargeLayerRef = useRef<L.LayerGroup | null>(null);
+  const potentialLayerRef = useRef<L.LayerGroup | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   // Layer visibility toggles
   const [showSatellite, setShowSatellite] = useState(true);
   const [showCyanNetwork, setShowCyanNetwork] = useState(true);
-  const [showContours, setShowContours] = useState(true);
+  const [showSubPathways, setShowSubPathways] = useState(true);
   const [showBoundary, setShowBoundary] = useState(true);
   const [showCadastral, setShowCadastral] = useState(true);
-  const [showPotentialHeatmap, setShowPotentialHeatmap] = useState(true);
+  const [showPotentialHeatmap, setShowPotentialHeatmap] = useState(false);
+  const [showRechargeZones, setShowRechargeZones] = useState(true);
   const [showCandidates, setShowCandidates] = useState(true);
   const [showHistoricalWells, setShowHistoricalWells] = useState(true);
   const [cursorCoords, setCursorCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -106,10 +114,11 @@ export const MapView: React.FC<MapViewProps> = ({
     ).addTo(map);
     tileLayerRef.current = esriSatellite;
 
-    // Create layer groups
+    // Create layer groups in strict visual depth order
+    potentialLayerRef.current = L.layerGroup().addTo(map);
+    rechargeLayerRef.current = L.layerGroup().addTo(map);
     boundaryLayerRef.current = L.layerGroup().addTo(map);
     cadastralLayerRef.current = L.layerGroup().addTo(map);
-    contoursLayerRef.current = L.layerGroup().addTo(map);
     pathwaysLayerRef.current = L.layerGroup().addTo(map);
     candidatesLayerRef.current = L.layerGroup().addTo(map);
     wellsLayerRef.current = L.layerGroup().addTo(map);
@@ -286,49 +295,162 @@ export const MapView: React.FC<MapViewProps> = ({
     });
   }, [cadastralParcels, showCadastral]);
 
-  // Render Cyan Branching Network (Drainage & Lineament Pathways matching reference image)
+  // Render Groundwater Potential Map Layer (5-Class Heatmap Overlay)
+  useEffect(() => {
+    if (!potentialLayerRef.current) return;
+    potentialLayerRef.current.clearLayers();
+    if (!showPotentialHeatmap || !groundwaterPotentialGrid || groundwaterPotentialGrid.length === 0) return;
+
+    const rows = groundwaterPotentialGrid.length;
+    const cols = groundwaterPotentialGrid[0].length;
+    if (rows < 2 || cols < 2) return;
+
+    const latStepHalf = Math.abs(groundwaterPotentialGrid[1][0].lat - groundwaterPotentialGrid[0][0].lat) / 2;
+    const lngStepHalf = Math.abs(groundwaterPotentialGrid[0][1].lng - groundwaterPotentialGrid[0][0].lng) / 2;
+
+    const classColors: Record<string, string> = {
+      'Very High Potential': '#10b981', // Emerald green
+      'High Potential': '#06b6d4',      // Vibrant cyan
+      'Moderate Potential': '#f59e0b',  // Amber gold
+      'Low Potential': '#f97316',       // Orange
+      'Very Low Potential': '#ef4444',  // Coral red
+    };
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = groundwaterPotentialGrid[r][c];
+        const color = classColors[cell.potentialClass] || '#06b6d4';
+
+        const bounds: L.LatLngBoundsExpression = [
+          [cell.lat - latStepHalf, cell.lng - lngStepHalf],
+          [cell.lat + latStepHalf, cell.lng + lngStepHalf],
+        ];
+
+        const rect = L.rectangle(bounds, {
+          color: color,
+          weight: 0.5,
+          opacity: 0.45,
+          fillColor: color,
+          fillOpacity: 0.28,
+        });
+
+        rect.bindPopup(`
+          <div class="p-2.5 text-xs font-sans text-slate-100 bg-slate-950 border border-slate-800 rounded-xl shadow-xl min-w-[200px]">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1 mb-1.5">
+              <span class="font-bold text-white">${cell.potentialClass}</span>
+              <span class="font-mono font-black text-xs" style="color: ${color}">${cell.score}/100</span>
+            </div>
+            <div class="space-y-1 text-[11px] text-slate-300">
+              <div>Elevation: <span class="font-mono text-slate-100">${cell.elevation} m AMSL</span></div>
+              <div>Slope: <span class="font-mono text-slate-100">${cell.slopeDeg}°</span></div>
+              <div>Water Table Depth: <span class="font-mono text-amber-300 font-bold">~${cell.depthToWaterM} m bgl</span></div>
+              <div>Accumulation Index: <span class="font-mono text-cyan-300">${cell.flowAccumulation}</span></div>
+            </div>
+          </div>
+        `);
+
+        rect.addTo(potentialLayerRef.current!);
+      }
+    }
+  }, [groundwaterPotentialGrid, showPotentialHeatmap]);
+
+  // Render Groundwater Recharge Zones (Infiltration Basins & Swales)
+  useEffect(() => {
+    if (!rechargeLayerRef.current) return;
+    rechargeLayerRef.current.clearLayers();
+    if (!showRechargeZones || !rechargeZones || rechargeZones.length === 0) return;
+
+    rechargeZones.forEach(rz => {
+      const poly = L.polygon(rz.coordinates, {
+        color: '#10b981',
+        weight: 2,
+        dashArray: '5, 4',
+        fillColor: '#10b981',
+        fillOpacity: 0.16,
+      });
+
+      poly.bindPopup(`
+        <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-emerald-500/50 rounded-xl shadow-2xl min-w-[230px]">
+          <div class="flex items-center gap-1.5 font-bold text-emerald-400 mb-1.5 border-b border-slate-800 pb-1">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>${rz.name}</span>
+          </div>
+          <div class="text-[11px] text-slate-300 mb-2 leading-relaxed">${rz.description}</div>
+          <div class="space-y-1 text-[10.5px] border-t border-slate-800 pt-1.5 text-slate-300">
+            <div>Infiltration Rate: <span class="font-mono font-bold text-emerald-300">${rz.infiltrationRateMmHr} mm/hr</span></div>
+            <div>Extent: <span class="font-mono text-white">${rz.areaHectares} Ha</span></div>
+            <div>Annual Recharge: <span class="font-mono text-cyan-300 font-bold">${rz.annualRechargePotentialM3.toLocaleString()} m³/yr</span></div>
+            <div>Capacity: <span class="text-slate-200 font-semibold">${rz.soilInfiltrationCapacity}</span></div>
+          </div>
+        </div>
+      `);
+
+      poly.addTo(rechargeLayerRef.current!);
+
+      // Centered Recharge Icon Badge
+      const rzIcon = L.divIcon({
+        className: 'recharge-zone-marker',
+        html: `
+          <div class="bg-emerald-950/90 text-emerald-300 border border-emerald-500/70 font-mono font-bold text-[8.5px] px-1.5 py-0.5 rounded shadow-lg whitespace-nowrap cursor-pointer hover:bg-emerald-500 hover:text-slate-950 transition -translate-x-1/2 -translate-y-1/2 flex items-center gap-1">
+            <span>💧</span>
+            <span>${rz.name.split(' ')[0]}</span>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const marker = L.marker(rz.center, { icon: rzIcon, interactive: false });
+      marker.addTo(rechargeLayerRef.current!);
+    });
+  }, [rechargeZones, showRechargeZones]);
+
+  // Render Cyan Branching Network (Drainage & Sub-Pathways matching reference image)
   useEffect(() => {
     if (!pathwaysLayerRef.current) return;
     pathwaysLayerRef.current.clearLayers();
     if (!showCyanNetwork) return;
 
     pathways.forEach(pw => {
-      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow' || pw.type === 'sub_pathway' || pw.type === 'recharge_zone';
+      // Filter sub-pathways if disabled
+      if (pw.isSubPathway && !showSubPathways) return;
+
+      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow';
+      const isSubsurfaceFlow = pw.type === 'subsurface_flow';
+      const isSub = pw.isSubPathway;
 
       // Stream order thickness hierarchy matching reference image:
-      // Order 1 (major trunk): 3.8px
+      // Order 1 (major trunk): 3.6px
       // Order 2 (secondary branch): 2.6px
-      // Order 3 (tertiary sub-pathway): 1.8px
-      // Order 4 (micro-feeder twig): 1.3px
+      // Order 3 (feeder sub-pathway): 1.6px
+      // Order 4 (tertiary twig rill): 1.2px
       let weight = 2.4;
-      if (pw.streamOrder === 1) weight = 3.8;
+      if (pw.streamOrder === 1) weight = 3.6;
       else if (pw.streamOrder === 2) weight = 2.6;
-      else if (pw.streamOrder === 3) weight = 1.8;
-      else weight = 1.3;
+      else if (pw.streamOrder === 3) weight = 1.6;
+      else weight = 1.2;
 
       const polyline = L.polyline(pw.coordinates, {
         color: '#00f3ff', // Radiant solid cyan matching reference image
-        weight,
-        opacity: 0.96,
-        className: 'cyan-network-glow',
+        weight: isSubsurfaceFlow ? weight + 0.4 : weight,
+        opacity: isSub ? 0.90 : isSubsurface ? 0.92 : 0.98,
+        dashArray: isSubsurfaceFlow ? '8, 4' : isSubsurface ? '6, 4' : undefined,
+        className: isSubsurfaceFlow ? 'cyan-subsurface-glow pulse-subsurface' : isSubsurface ? 'cyan-subsurface-glow' : 'cyan-network-glow',
       });
 
-      const title = pw.type === 'subsurface_flow'
-        ? 'Subsurface Groundwater Flow Pathway (Darcy Flow)'
-        : pw.type === 'sub_pathway'
-        ? `Tributary Sub-Pathway Branch (Order ${pw.streamOrder})`
-        : pw.type === 'recharge_zone'
-        ? 'Recharge Zone Infiltration Swale'
+      const title = isSub
+        ? `Feeder Sub-Pathway (Order ${pw.streamOrder})`
+        : isSubsurfaceFlow
+        ? 'Subsurface Groundwater Flow Conduit (Darcy Flow)'
         : pw.type === 'palaeochannel'
         ? 'Buried Palaeochannel Aquifer Corridor'
         : pw.type === 'inferred_fracture'
         ? 'Tectonic Structural Fracture Corridor'
-        : `Primary Drainage Pathway (Order ${pw.streamOrder})`;
+        : `Primary Drainage Channel (Order ${pw.streamOrder})`;
 
       polyline.bindPopup(`
         <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[240px]">
           <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
-            <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full ${isSubsurface ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
             <span>${title}</span>
           </div>
           <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
@@ -345,55 +467,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       polyline.addTo(pathwaysLayerRef.current!);
     });
-  }, [pathways, showCyanNetwork]);
-
-  // Render Subsurface Groundwater Flow & Hydraulic Head Contours
-  // Clearly visible contours matching the perspective satellite reference image!
-  useEffect(() => {
-    if (!contoursLayerRef.current) return;
-    contoursLayerRef.current.clearLayers();
-    if (!showContours || !contours || contours.length === 0) return;
-
-    contours.forEach(contour => {
-      const isIndex = contour.isIndexContour;
-
-      // Subtle, elegant sky blue/cyan contour styling
-      const polyline = L.polyline(contour.coordinates, {
-        color: isIndex ? '#38bdf8' : '#0ea5e9', // Sky blue for index, cyan for intermediate
-        weight: isIndex ? 1.8 : 1.1,
-        opacity: isIndex ? 0.75 : 0.45,
-        dashArray: isIndex ? undefined : '5, 4',
-      });
-
-      polyline.bindTooltip(
-        `<div class="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-950 text-cyan-300 border border-cyan-500/50 rounded shadow-md">
-          Head Equipotential: ${contour.elevationM}m AMSL | Depth: ~${contour.depthBglM}m bgl
-        </div>`,
-        { sticky: true, className: 'contour-tooltip' }
-      );
-
-      polyline.addTo(contoursLayerRef.current!);
-
-      // Small elevation badge on index contours
-      if (isIndex && contour.coordinates.length >= 4) {
-        const midIdx = Math.floor(contour.coordinates.length / 2);
-        const midPt = contour.coordinates[midIdx];
-
-        const labelIcon = L.divIcon({
-          className: 'contour-label-marker',
-          html: `
-            <div class="bg-slate-950/90 text-sky-300 border border-sky-400/50 font-mono font-bold text-[8.5px] px-1.5 py-0.2 rounded shadow whitespace-nowrap -translate-x-1/2 -translate-y-1/2">
-              ${contour.elevationM}m
-            </div>
-          `,
-          iconSize: [0, 0],
-        });
-
-        const labelMarker = L.marker(midPt, { icon: labelIcon, interactive: false });
-        labelMarker.addTo(contoursLayerRef.current!);
-      }
-    });
-  }, [contours, showContours]);
+  }, [pathways, showCyanNetwork, showSubPathways]);
 
   // Render Top 3 Borewell Candidate Pins (Point 1: Gold/Red, Point 2: Blue, Point 3: Green)
   useEffect(() => {
@@ -622,7 +696,10 @@ export const MapView: React.FC<MapViewProps> = ({
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
                   <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
-                  <span>Cyan Drainage & Lineaments</span>
+                  <span className="font-medium text-cyan-300">Cyan Network Overlay</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">
+                    {pathways.length}
+                  </span>
                 </span>
                 <input
                   type="checkbox"
@@ -632,17 +709,54 @@ export const MapView: React.FC<MapViewProps> = ({
                 />
               </label>
 
-              {/* Subsurface Flow & Hydraulic Head Contours */}
+              {/* Sub-Pathways Feeder Toggle */}
+              {showCyanNetwork && (
+                <label className="flex items-center justify-between gap-3 px-1.5 py-0.5 pl-6 rounded hover:bg-slate-800/40 cursor-pointer text-[10.5px] text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-px bg-cyan-400"></span>
+                    <span>Feeder Sub-Pathways</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={showSubPathways}
+                    onChange={e => setShowSubPathways(e.target.checked)}
+                    className="accent-cyan-400 rounded"
+                  />
+                </label>
+              )}
+
+              {/* Groundwater Potential Map Heatmap */}
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
-                  <span className="w-3 h-0.5 bg-sky-400 shadow-[0_0_4px_#38bdf8]"></span>
-                  <span className="text-sky-300 font-medium">Subsurface Flow Contours</span>
+                  <span className="flex gap-0.5">
+                    <span className="w-1.5 h-2 bg-emerald-400 rounded-xs"></span>
+                    <span className="w-1.5 h-2 bg-cyan-400 rounded-xs"></span>
+                    <span className="w-1.5 h-2 bg-amber-400 rounded-xs"></span>
+                  </span>
+                  <span className="text-emerald-300 font-medium">Groundwater Potential Map</span>
                 </span>
                 <input
                   type="checkbox"
-                  checked={showContours}
-                  onChange={e => setShowContours(e.target.checked)}
-                  className="accent-sky-400 rounded"
+                  checked={showPotentialHeatmap}
+                  onChange={e => setShowPotentialHeatmap(e.target.checked)}
+                  className="accent-emerald-400 rounded"
+                />
+              </label>
+
+              {/* Groundwater Recharge Zones */}
+              <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
+                <span className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 border-2 border-dashed border-emerald-400 bg-emerald-400/20 rounded-sm"></span>
+                  <span className="text-emerald-300 font-medium">Recharge Zones (Basins)</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
+                    {rechargeZones.length}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showRechargeZones}
+                  onChange={e => setShowRechargeZones(e.target.checked)}
+                  className="accent-emerald-400 rounded"
                 />
               </label>
 
@@ -773,13 +887,23 @@ export const MapView: React.FC<MapViewProps> = ({
         {/* Expandable Legend Content Body */}
         {!isLegendMinimized && (
           <div className="space-y-1.5 text-[11px] text-slate-300 pt-1">
-            {/* Solid Cyan Line */}
+            {/* Primary Collector Trunks */}
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-0.5 bg-cyan-400 shadow-[0_0_8px_#00f3ff] rounded-full shrink-0"></div>
+              <div className="w-7 h-1 bg-cyan-400 shadow-[0_0_8px_#00f3ff] rounded-full shrink-0"></div>
               <div>
-                <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
-                <span className="text-slate-300">Surface Drainage & Flow Pathways</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Terrain convergence channels, nullahs & runoff gullies (D8 flow routing)</p>
+                <span className="text-cyan-300 font-semibold">Thick Solid Cyan:</span>{' '}
+                <span className="text-slate-200 font-medium">Primary Drainage & Conduits</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Master collector channels & valley convergence corridors (D8 routing)</p>
+              </div>
+            </div>
+
+            {/* Feeder Sub-Pathways (Herringbone / Pinnate) */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-0.5 bg-cyan-400/80 shadow-[0_0_4px_#00f3ff] shrink-0"></div>
+              <div>
+                <span className="text-cyan-300 font-semibold">Thin Cyan:</span>{' '}
+                <span className="text-slate-200 font-medium">Feeder Sub-Pathways</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Lateral rills, colluvial drainage & shallow saprolite interflow branches</p>
               </div>
             </div>
 
@@ -788,18 +912,30 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="w-7 border-b-2 border-dashed border-cyan-400 shadow-[0_0_8px_#00f3ff] shrink-0"></div>
               <div>
                 <span className="text-cyan-300 font-semibold">Dashed Cyan:</span>{' '}
-                <span className="text-slate-300">Inferred Subsurface Fractures</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Tectonic shear corridors, lineaments & palaeochannels (requires VES confirmation)</p>
+                <span className="text-slate-200 font-medium">Subsurface Fractures & Palaeochannels</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Tectonic shear zones, joint trends & buried alluvial gravel channels</p>
               </div>
             </div>
 
-            {/* Subsurface Flow & Hydraulic Head Contours */}
+            {/* Recharge Zones */}
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-0.5 bg-sky-400 shadow-[0_0_6px_#38bdf8] rounded-full shrink-0"></div>
+              <div className="w-4 h-3 border-2 border-dashed border-emerald-400 bg-emerald-400/20 rounded-sm shrink-0"></div>
               <div>
-                <span className="text-sky-300 font-semibold">Sky Blue Contours:</span>{' '}
-                <span className="text-slate-300">Subsurface Hydraulic Head Equipotentials</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Groundwater table elevation contours (H = Z - Dwt); flow is perpendicular to lines</p>
+                <span className="text-emerald-300 font-semibold">Emerald Dashed:</span>{' '}
+                <span className="text-slate-200 font-medium">Groundwater Recharge Zones</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Topographic swales & high infiltration capacity basins</p>
+              </div>
+            </div>
+
+            {/* 5-Class Potential Heatmap Palette */}
+            <div className="pt-1 border-t border-slate-800/80">
+              <span className="text-slate-400 text-[10px] block mb-1">Groundwater Potential Scale:</span>
+              <div className="grid grid-cols-5 gap-1 text-center text-[9px] font-mono">
+                <div className="bg-emerald-500 text-slate-950 font-bold rounded px-1 py-0.5">V.High</div>
+                <div className="bg-cyan-500 text-slate-950 font-bold rounded px-1 py-0.5">High</div>
+                <div className="bg-amber-400 text-slate-950 font-bold rounded px-1 py-0.5">Mod</div>
+                <div className="bg-orange-500 text-slate-950 font-bold rounded px-1 py-0.5">Low</div>
+                <div className="bg-rose-500 text-white font-bold rounded px-1 py-0.5">V.Low</div>
               </div>
             </div>
 
@@ -808,7 +944,7 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="w-4 h-3 border-2 border-yellow-400 bg-yellow-400/20 rounded-sm shrink-0"></div>
               <div>
                 <span className="text-yellow-300 font-semibold">Yellow Outline:</span>{' '}
-                <span className="text-slate-300">Survey Parcel Boundary</span>
+                <span className="text-slate-200">Survey Parcel Boundary</span>
               </div>
             </div>
 
@@ -817,8 +953,7 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="w-4 h-3 border border-dashed border-amber-400 bg-amber-400/20 rounded-sm shrink-0 flex items-center justify-center text-[7px] font-mono text-amber-300 font-bold">Sy</div>
               <div>
                 <span className="text-amber-400 font-semibold">Amber Dashed / Label:</span>{' '}
-                <span className="text-slate-300">Bhuvan Cadastral Survey No.</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Land records & Sy. Nos from bhuvan.nrsc.gov.in</p>
+                <span className="text-slate-200">Bhuvan Cadastral Survey No.</span>
               </div>
             </div>
 

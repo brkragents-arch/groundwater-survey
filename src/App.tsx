@@ -382,7 +382,6 @@ export function App() {
             boundary={boundary}
             candidates={candidates}
             pathways={hydrologyResult.pathways}
-            contours={hydrologyResult.subsurfaceContours}
             cadastralParcels={cadastralParcels}
             selectedCandidateId={selectedCandidateId}
             onSelectCandidate={id => setSelectedCandidateId(id)}
@@ -390,6 +389,8 @@ export function App() {
             isDrawingMode={isDrawingMode}
             onPolygonDrawn={handlePolygonDrawn}
             onCancelDraw={() => setIsDrawingMode(false)}
+            rechargeZones={hydrologyResult.rechargeZones}
+            groundwaterPotentialGrid={hydrologyResult.groundwaterPotentialGrid}
           />
 
           {/* Toast Notification Banner */}
