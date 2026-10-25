@@ -14,6 +14,19 @@ export type PathwayType =
   | 'lineament_intersection'
   | 'subsurface_flow';
 
+export interface FractureIntersectionNode {
+  id: string;
+  lat: number;
+  lng: number;
+  masterFractureId: string;
+  branchFractureId: string;
+  intersectionAngleDeg: number;
+  transmissivityEnhancementFactor: number;
+  flowConvergenceScore: number;
+  depthToWaterTableM: number;
+  description: string;
+}
+
 export interface BranchingPathway {
   id: string;
   type: PathwayType;
@@ -27,6 +40,13 @@ export interface BranchingPathway {
   depthToWaterM?: number;
   flowDirectionDeg?: number;
   darcyFluxM3PerDay?: number;
+  // Fracture branching metadata
+  isFractureBranch?: boolean;
+  parentBranchId?: string;
+  fractureBranchType?: 'master_corridor' | 'conjugate_shear_splay' | 'extensional_wing_crack' | 'antithetic_splay';
+  fractureApertureMm?: number;
+  junctionAngleDeg?: number;
+  transmissivityM2PerDay?: number;
 }
 
 export interface BorewellCandidate {

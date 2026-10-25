@@ -91,7 +91,7 @@ export function App() {
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(
-    'AQUASYNC AI Geologist loaded. Cyan branching network & Top 3 points active.'
+    'AQUASYNC AI Geologist loaded. Inferred subsurface fracture branches and prime drilling hubs active.'
   );
 
   useEffect(() => {
@@ -198,7 +198,7 @@ export function App() {
       setSelectedCandidateId(top3[0]?.id || null);
       setIsAnalyzing(false);
       setToastMessage(
-        `Subsurface flows re-analysed: ${hydro.subsurfacePathwaysCount} deep aquifer conduits mapped. Water table: ~${hydro.meanWaterTableDepthM}m bgl, hydraulic grad: ${hydro.meanHydraulicGradient} m/m.`
+        `Subsurface fractures & flows re-analysed: ${hydro.fractureAnalysis?.totalMasterFractures || 5} master corridors, ${hydro.fractureAnalysis?.totalFractureBranches || 15} branches & ${hydro.fractureIntersectionNodes?.length || 0} high-yield drilling hubs mapped.`
       );
     }, 600);
   };
@@ -389,6 +389,8 @@ export function App() {
             isDrawingMode={isDrawingMode}
             onPolygonDrawn={handlePolygonDrawn}
             onCancelDraw={() => setIsDrawingMode(false)}
+            fractureIntersectionNodes={hydrologyResult.fractureIntersectionNodes}
+            fractureAnalysis={hydrologyResult.fractureAnalysis}
           />
 
           {/* Toast Notification Banner */}

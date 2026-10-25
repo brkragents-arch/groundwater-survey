@@ -6,7 +6,9 @@ import {
   SurveyBoundary,
   HistoricalWellRecord,
   CadastralParcel,
+  FractureIntersectionNode,
 } from '../types/hydrogeology';
+import { FractureBranchAnalysis } from '../services/demHydrology';
 import {
   Layers,
   Crosshair,
@@ -33,6 +35,8 @@ interface MapViewProps {
   isDrawingMode: boolean;
   onPolygonDrawn: (coords: [number, number][]) => void;
   onCancelDraw: () => void;
+  fractureIntersectionNodes?: FractureIntersectionNode[];
+  fractureAnalysis?: FractureBranchAnalysis;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -46,6 +50,8 @@ export const MapView: React.FC<MapViewProps> = ({
   isDrawingMode,
   onPolygonDrawn,
   onCancelDraw,
+  fractureIntersectionNodes = [],
+  fractureAnalysis,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -57,11 +63,14 @@ export const MapView: React.FC<MapViewProps> = ({
   const candidatesLayerRef = useRef<L.LayerGroup | null>(null);
   const wellsLayerRef = useRef<L.LayerGroup | null>(null);
   const drawLayerRef = useRef<L.LayerGroup | null>(null);
+  const fractureHubsLayerRef = useRef<L.LayerGroup | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   // Layer visibility toggles
   const [showSatellite, setShowSatellite] = useState(true);
-  const [showCyanNetwork, setShowCyanNetwork] = useState(true);
+  const [showInferredFractures, setShowInferredFractures] = useState(true);
+  const [showFractureHubs, setShowFractureHubs] = useState(true);
+  const [showDrainagePathways, setShowDrainagePathways] = useState(true);
   const [showBoundary, setShowBoundary] = useState(true);
   const [showCadastral, setShowCadastral] = useState(true);
   const [showPotentialHeatmap, setShowPotentialHeatmap] = useState(true);
@@ -76,6 +85,12 @@ export const MapView: React.FC<MapViewProps> = ({
 
   // Drawing mode points buffer
   const [drawnPoints, setDrawnPoints] = useState<[number, number][]>([]);
+
+  // Inferred Subsurface Fracture Analysis statistics
+  const masterFractures = pathways.filter(p => p.type === 'inferred_fracture' && !p.isFractureBranch);
+  const fractureBranches = pathways.filter(p => p.type === 'inferred_fracture' && p.isFractureBranch);
+  const drainagePathways = pathways.filter(p => p.type === 'surface_drainage');
+  const palaeochannels = pathways.filter(p => p.type === 'palaeochannel');
 
   // Initialize Map
   useEffect(() => {
@@ -107,6 +122,7 @@ export const MapView: React.FC<MapViewProps> = ({
     pathwaysLayerRef.current = L.layerGroup().addTo(map);
     candidatesLayerRef.current = L.layerGroup().addTo(map);
     wellsLayerRef.current = L.layerGroup().addTo(map);
+    fractureHubsLayerRef.current = L.layerGroup().addTo(map);
     drawLayerRef.current = L.layerGroup().addTo(map);
 
     // Track mouse coordinate inspection
@@ -280,53 +296,97 @@ export const MapView: React.FC<MapViewProps> = ({
     });
   }, [cadastralParcels, showCadastral]);
 
-  // Render Cyan Branching Network (Drainage & Lineament Pathways matching reference image)
+  // Render Inferred Subsurface Fractures, Fracture Branches & Drainage Pathways
   useEffect(() => {
     if (!pathwaysLayerRef.current) return;
     pathwaysLayerRef.current.clearLayers();
-    if (!showCyanNetwork) return;
 
     pathways.forEach(pw => {
-      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow';
+      const isFracture = pw.type === 'inferred_fracture';
+      const isPalaeo = pw.type === 'palaeochannel';
+      const isDrainage = pw.type === 'surface_drainage';
       const isSubsurfaceFlow = pw.type === 'subsurface_flow';
 
-      // Stream order thickness hierarchy:
-      // Order 1 (major trunk): 3.6px
-      // Order 2: 2.6px
-      // Order 3: 1.8px
-      // Order 4: 1.3px
+      if (isFracture && !showInferredFractures) return;
+      if (isDrainage && !showDrainagePathways) return;
+
+      const isBranch = pw.isFractureBranch;
+
+      // Visual hierarchy styling
       let weight = 2.4;
-      if (pw.streamOrder === 1) weight = 3.6;
-      else if (pw.streamOrder === 2) weight = 2.6;
-      else if (pw.streamOrder === 3) weight = 1.8;
-      else weight = 1.3;
+      let color = '#00f3ff';
+      let dashArray: string | undefined = undefined;
+      let cssClass = 'cyan-network-glow';
+      let title = `Surface Drainage Channel (Order ${pw.streamOrder})`;
+
+      if (isFracture) {
+        if (isBranch) {
+          if (pw.streamOrder === 4) {
+            // Tertiary micro-splay
+            weight = 1.6;
+            color = '#38bdf8';
+            dashArray = '4, 3';
+            cssClass = 'cyan-subsurface-glow';
+            title = 'Inferred Fracture Branch (Tertiary Dilated Joint Splay)';
+          } else {
+            // Secondary conjugate Riedel splay branch
+            weight = 2.4;
+            color = '#00f3ff';
+            dashArray = '6, 4';
+            cssClass = 'cyan-subsurface-glow';
+            title = `Inferred Subsurface Fracture Branch (${
+              pw.fractureBranchType === 'conjugate_shear_splay' ? 'Conjugate Riedel Splay' : 'Extensional Wing Splay'
+            })`;
+          }
+        } else {
+          // Master fracture corridor
+          weight = 3.8;
+          color = '#00f3ff';
+          dashArray = '9, 5';
+          cssClass = 'cyan-subsurface-glow pulse-subsurface';
+          title = 'Master Inferred Subsurface Fracture Corridor (Primary Shear Zone)';
+        }
+      } else if (isPalaeo) {
+        weight = 3.0;
+        dashArray = '8, 4';
+        title = 'Buried Palaeochannel Aquifer Corridor';
+
+        // Add soft alluvial buffer ribbon
+        const ribbon = L.polyline(pw.coordinates, {
+          color: '#0284c7',
+          weight: 8,
+          opacity: 0.35,
+          interactive: false,
+        });
+        ribbon.addTo(pathwaysLayerRef.current!);
+      } else if (isSubsurfaceFlow) {
+        weight = 3.0;
+        dashArray = '7, 4';
+        cssClass = 'cyan-subsurface-glow pulse-subsurface';
+        title = 'Subsurface Groundwater Flow Conduit (Darcy Flow)';
+      }
 
       const polyline = L.polyline(pw.coordinates, {
-        color: isSubsurfaceFlow ? '#00f3ff' : '#00f3ff', // Radiant cyan matching reference image
-        weight: isSubsurfaceFlow ? weight + 0.5 : weight,
-        opacity: isSubsurface ? 0.90 : 0.95,
-        dashArray: isSubsurfaceFlow ? '8, 4' : isSubsurface ? '6, 4' : undefined,
-        className: isSubsurfaceFlow ? 'cyan-subsurface-glow pulse-subsurface' : isSubsurface ? 'cyan-subsurface-glow' : 'cyan-network-glow',
+        color,
+        weight,
+        opacity: isBranch ? 0.92 : 0.98,
+        dashArray,
+        className: cssClass,
       });
 
-      const title = isSubsurfaceFlow
-        ? 'Subsurface Groundwater Flow Conduit (Darcy Flow)'
-        : pw.type === 'palaeochannel'
-        ? 'Buried Palaeochannel Aquifer Corridor'
-        : pw.type === 'inferred_fracture'
-        ? 'Tectonic Structural Fracture Corridor'
-        : `Surface Drainage Channel (Order ${pw.streamOrder})`;
-
       polyline.bindPopup(`
-        <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[240px]">
+        <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[250px]">
           <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
-            <span class="inline-block w-2.5 h-2.5 rounded-full ${isSubsurface ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full ${isFracture ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
             <span>${title}</span>
           </div>
           <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
           <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
             <div>Confidence: <span class="text-slate-200 font-semibold">${pw.confidence}</span></div>
             <div>Flow Score: <span class="text-cyan-300 font-mono font-bold">${pw.flowAccumulationScore}</span></div>
+            ${isBranch ? `<div>Parent Conduit: <span class="text-cyan-200 font-mono font-bold">${pw.parentBranchId}</span></div>` : ''}
+            ${pw.junctionAngleDeg !== undefined ? `<div>Junction Angle: <span class="text-amber-300 font-mono font-bold">${pw.junctionAngleDeg}°</span></div>` : ''}
+            ${pw.fractureApertureMm !== undefined ? `<div>Dilated Aperture: <span class="text-emerald-300 font-mono font-bold">${pw.fractureApertureMm} mm</span></div>` : ''}
             ${pw.flowVelocityMPerDay !== undefined ? `<div>Darcy Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>` : ''}
             ${pw.hydraulicGradient !== undefined ? `<div>Hydraulic Grad: <span class="text-cyan-200 font-mono">${pw.hydraulicGradient} m/m</span></div>` : ''}
             ${pw.depthToWaterM !== undefined ? `<div>Water Table Depth: <span class="text-amber-300 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>` : ''}
@@ -337,9 +397,52 @@ export const MapView: React.FC<MapViewProps> = ({
 
       polyline.addTo(pathwaysLayerRef.current!);
     });
-  }, [pathways, showCyanNetwork]);
+  }, [pathways, showInferredFractures, showDrainagePathways]);
 
-  // Render Top 3 Borewell Candidate Pins (Point 1: Gold/Red, Point 2: Blue, Point 3: Green)
+  // Render Fracture Branch Intersection Hubs (Prime Borewell Targets)
+  useEffect(() => {
+    if (!fractureHubsLayerRef.current) return;
+    fractureHubsLayerRef.current.clearLayers();
+    if (!showFractureHubs || !fractureIntersectionNodes || fractureIntersectionNodes.length === 0) return;
+
+    fractureIntersectionNodes.forEach(node => {
+      const hubIcon = L.divIcon({
+        className: 'fracture-hub-marker',
+        html: `
+          <div class="relative flex items-center justify-center cursor-pointer -translate-x-1/2 -translate-y-1/2 group">
+            <div class="w-5 h-5 rounded-full bg-cyan-400/25 animate-ping absolute"></div>
+            <div class="w-3.5 h-3.5 rotate-45 bg-slate-950 border-2 border-cyan-400 group-hover:scale-125 transition-transform shadow-[0_0_10px_#00f3ff] flex items-center justify-center">
+              <div class="w-1 h-1 bg-cyan-300"></div>
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+      });
+
+      const marker = L.marker([node.lat, node.lng], { icon: hubIcon });
+
+      marker.bindPopup(`
+        <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-400/60 rounded-xl shadow-2xl min-w-[240px]">
+          <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1 border-b border-slate-800 pb-1">
+            <span class="w-2.5 h-2.5 rotate-45 bg-cyan-400 inline-block"></span>
+            <span>Fracture Branch Intersection Hub</span>
+          </div>
+          <div class="text-[11px] text-slate-300 mb-2 leading-relaxed">${node.description}</div>
+          <div class="space-y-1 text-[10.5px] border-t border-slate-800 pt-1.5 text-slate-300">
+            <div>Conjugate Angle: <span class="font-mono text-cyan-300 font-bold">${node.intersectionAngleDeg}°</span></div>
+            <div>Secondary Permeability: <span class="font-mono text-emerald-300 font-bold">+${node.transmissivityEnhancementFactor}x Enhancement</span></div>
+            <div>Convergence Index: <span class="font-mono text-cyan-200 font-bold">${node.flowConvergenceScore}/100</span></div>
+            <div>Target Depth to Water: <span class="font-mono text-amber-300 font-bold">~${node.depthToWaterTableM} m bgl</span></div>
+            <div class="pt-1 text-[10px] text-emerald-400 font-medium">★ Prime Recommended Siting Node for Deep Crystalline Borewell</div>
+          </div>
+        </div>
+      `);
+
+      marker.addTo(fractureHubsLayerRef.current!);
+    });
+  }, [fractureIntersectionNodes, showFractureHubs]);
+
+    // Render Top 3 Borewell Candidate Pins (Point 1: Gold/Red, Point 2: Blue, Point 3: Green)
   useEffect(() => {
     if (!candidatesLayerRef.current) return;
     candidatesLayerRef.current.clearLayers();
@@ -562,16 +665,53 @@ export const MapView: React.FC<MapViewProps> = ({
         {!isOverlaysMinimized && (
           <>
             <div className="space-y-1 text-slate-200">
-              {/* Cyan Branching Network */}
+                            {/* Inferred Subsurface Fractures with Branches */}
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
-                  <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
-                  <span>Cyan Drainage & Lineaments</span>
+                  <span className="w-3 border-b-2 border-dashed border-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
+                  <span className="text-cyan-300 font-medium">Inferred Subsurface Fractures & Branches</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">
+                    ${masterFractures.length}M / ${fractureBranches.length}B
+                  </span>
                 </span>
                 <input
                   type="checkbox"
-                  checked={showCyanNetwork}
-                  onChange={e => setShowCyanNetwork(e.target.checked)}
+                  checked={showInferredFractures}
+                  onChange={e => setShowInferredFractures(e.target.checked)}
+                  className="accent-cyan-400 rounded"
+                />
+              </label>
+
+              {/* Fracture Branch Intersection Hubs */}
+              <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
+                <span className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rotate-45 border border-cyan-400 bg-cyan-400/30"></span>
+                  <span className="text-cyan-200 font-medium">Fracture Intersection Hubs</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                    ${fractureIntersectionNodes?.length || 0} Nodes
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showFractureHubs}
+                  onChange={e => setShowFractureHubs(e.target.checked)}
+                  className="accent-cyan-400 rounded"
+                />
+              </label>
+
+              {/* Surface Drainage Pathways */}
+              <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
+                <span className="flex items-center gap-2">
+                  <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_4px_#00f3ff]"></span>
+                  <span>Surface Drainage Channels</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-300">
+                    ${drainagePathways.length}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showDrainagePathways}
+                  onChange={e => setShowDrainagePathways(e.target.checked)}
                   className="accent-cyan-400 rounded"
                 />
               </label>
@@ -703,23 +843,55 @@ export const MapView: React.FC<MapViewProps> = ({
         {/* Expandable Legend Content Body */}
         {!isLegendMinimized && (
           <div className="space-y-1.5 text-[11px] text-slate-300 pt-1">
-            {/* Solid Cyan Line */}
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-0.5 bg-cyan-400 shadow-[0_0_8px_#00f3ff] rounded-full shrink-0"></div>
-              <div>
-                <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
-                <span className="text-slate-300">Surface Drainage & Flow Pathways</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Terrain convergence channels, nullahs & runoff gullies (D8 flow routing)</p>
-              </div>
-            </div>
-
-            {/* Dashed Cyan Line */}
+                        {/* Master Inferred Subsurface Fracture Corridors */}
             <div className="flex items-center gap-2.5">
               <div className="w-7 border-b-2 border-dashed border-cyan-400 shadow-[0_0_8px_#00f3ff] shrink-0"></div>
               <div>
-                <span className="text-cyan-300 font-semibold">Dashed Cyan:</span>{' '}
-                <span className="text-slate-300">Inferred Subsurface Fractures</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Tectonic shear corridors, lineaments & palaeochannels (requires VES confirmation)</p>
+                <span className="text-cyan-300 font-semibold">Thick Dashed Cyan:</span>{' '}
+                <span className="text-slate-200 font-medium">Master Inferred Subsurface Fractures</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Primary regional tectonic shear corridors & fault damage zones</p>
+              </div>
+            </div>
+
+            {/* Inferred Subsurface Fracture Branches */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 border-b border-dashed border-cyan-400 shadow-[0_0_5px_#00f3ff] shrink-0"></div>
+              <div>
+                <span className="text-cyan-300 font-semibold">Medium Dashed Cyan:</span>{' '}
+                <span className="text-slate-200 font-medium">Inferred Fracture Branches</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Conjugate Riedel shear splays & secondary dilated joint conduits</p>
+              </div>
+            </div>
+
+            {/* Tertiary Micro-Splays */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 border-b border-dotted border-sky-400 shadow-[0_0_4px_#38bdf8] shrink-0"></div>
+              <div>
+                <span className="text-sky-300 font-semibold">Fine Dashed Sky-Blue:</span>{' '}
+                <span className="text-slate-200 font-medium">Tertiary Joint Splays</span>
+                <p className="text-[10px] text-slate-400 leading-tight">En-echelon micro-cracks & local extensional bedrock fractures</p>
+              </div>
+            </div>
+
+            {/* Fracture Branch Intersection Hubs */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-3.5 h-3.5 rotate-45 border-2 border-cyan-400 bg-slate-950 shadow-[0_0_8px_#00f3ff] shrink-0 flex items-center justify-center">
+                <div className="w-1 h-1 bg-cyan-300"></div>
+              </div>
+              <div>
+                <span className="text-cyan-300 font-semibold">Cyan Diamond Hub:</span>{' '}
+                <span className="text-slate-200 font-medium">Fracture Intersection Nodes</span>
+                <p className="text-[10px] text-slate-400 leading-tight">High-yield conjugate branch convergence hubs (+24x permeability)</p>
+              </div>
+            </div>
+
+            {/* Solid Cyan Line */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff] rounded-full shrink-0"></div>
+              <div>
+                <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
+                <span className="text-slate-300">Surface Drainage Channels</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Terrain convergence channels, nullahs & runoff gullies (D8 routing)</p>
               </div>
             </div>
 

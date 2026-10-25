@@ -1,4 +1,4 @@
-import { BranchingPathway, ConfidenceLevel } from '../types/hydrogeology';
+import { BranchingPathway, ConfidenceLevel, FractureIntersectionNode, PathwayType } from '../types/hydrogeology';
 
 export interface ElevationGridPoint {
   lat: number;
@@ -16,6 +16,16 @@ export interface ElevationGridPoint {
   aquiferTransmissivityM2PerDay: number; // Local transmissivity
 }
 
+export interface FractureBranchAnalysis {
+  totalMasterFractures: number;
+  totalFractureBranches: number;
+  totalIntersectionNodes: number;
+  primaryShearAzimuths: string[];
+  meanBranchLengthM: number;
+  dominantFractureMechanism: string;
+  intersectionNodes: FractureIntersectionNode[];
+}
+
 export interface HydrologyAnalysisResult {
   elevationGrid: ElevationGridPoint[][];
   minElevation: number;
@@ -28,6 +38,8 @@ export interface HydrologyAnalysisResult {
   regionalFlowDirectionDeg: number;
   dominantFlowRegime: string;
   subsurfacePathwaysCount: number;
+  fractureAnalysis?: FractureBranchAnalysis;
+  fractureIntersectionNodes?: FractureIntersectionNode[];
 }
 
 /**
@@ -409,19 +421,30 @@ export function generateHydrologyAndDrainage(
     }
   }
 
-  // 7. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
+  // 7. Analysis & Delineation of Inferred Subsurface Fractures & Fracture Branches
   const lineamentAngle1 = valleyAngleRad;
   const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.3);
-  const numLineaments = 5;
+  const numMasterFractures = 5;
+  const fractureIntersectionNodes: FractureIntersectionNode[] = [];
+  let fractureBranchCount = 0;
+  let totalBranchLengthM = 0;
 
-  for (let i = 0; i < numLineaments; i++) {
+  const masterFracturesList: {
+    id: string;
+    coords: [number, number][];
+    angle: number;
+    type: PathwayType;
+    index: number;
+  }[] = [];
+
+  for (let i = 0; i < numMasterFractures; i++) {
     const angle = i % 2 === 0 ? lineamentAngle1 : lineamentAngle2;
     const offsetFrac = (i - 2) * 0.28;
     const offsetLat = centerLat + offsetFrac * latSpan;
     const offsetLng = centerLng + offsetFrac * lngSpan * 0.7;
 
-    const lengthDeg = Math.max(latSpan, lngSpan) * 1.3;
-    const numPoints = 8;
+    const lengthDeg = Math.max(latSpan, lngSpan) * 1.35;
+    const numPoints = 9;
     const lineamentCoords: [number, number][] = [];
 
     for (let p = 0; p < numPoints; p++) {
@@ -432,25 +455,179 @@ export function generateHydrologyAndDrainage(
       lineamentCoords.push([lat + sinWiggle, lng + sinWiggle]);
     }
 
+    const masterId = `master-fracture-${pathwayCounter++}`;
+    const pType: PathwayType = i === 2 ? 'palaeochannel' : 'inferred_fracture';
+
     pathways.push({
-      id: `lineament-fracture-${pathwayCounter++}`,
-      type: i === 2 ? 'palaeochannel' : 'inferred_fracture',
+      id: masterId,
+      type: pType,
       streamOrder: 2,
       coordinates: lineamentCoords,
       confidence: i < 3 ? 'High' : 'Moderate',
-      flowAccumulationScore: 28 + i * 5,
-      flowVelocityMPerDay: i === 2 ? 1.45 : 0.85,
+      flowAccumulationScore: 32 + i * 6,
+      flowVelocityMPerDay: i === 2 ? 1.45 : 0.95,
       hydraulicGradient: 0.012,
-      depthToWaterM: i === 2 ? 4.8 : 7.2,
-      darcyFluxM3PerDay: i === 2 ? 320 : 185,
-      flowDirectionDeg: Math.round(angle * 180 / Math.PI),
+      depthToWaterM: i === 2 ? 4.8 : 6.8,
+      darcyFluxM3PerDay: i === 2 ? 320 : 195,
+      flowDirectionDeg: Math.round((angle * 180 / Math.PI + 360) % 360),
+      isFractureBranch: false,
+      fractureBranchType: 'master_corridor',
+      fractureApertureMm: 2.5,
+      transmissivityM2PerDay: i === 2 ? 380 : 210,
       description: i === 2
-        ? 'Buried palaeochannel corridor with thick alluvial gravel fill, multi-layered aquifer storage, and high secondary transmissivity.'
-        : `Tectonic structural fracture / shear corridor oriented along azimuth ${Math.round(angle * 180 / Math.PI)}° with enhanced secondary fracture permeability.`,
+        ? 'Master buried palaeochannel aquifer corridor with alluvial gravel fill and high multi-layer secondary storage.'
+        : `Master Inferred Subsurface Fracture Corridor (Primary Shear Zone, Strike Azimuth ${Math.round((angle * 180 / Math.PI + 360) % 360)}°) with deep dilated fracture conduits.`,
+    });
+
+    masterFracturesList.push({
+      id: masterId,
+      coords: lineamentCoords,
+      angle,
+      type: pType,
+      index: i,
     });
   }
 
-  const meanSlopeDeg = Math.round((totalSlope / ((gridSize - 2) * (gridSize - 2))) * 10) / 10;
+  // Generate Fracture Branches branching off each master fracture corridor
+  // Geological mechanics: Synthetic Riedel shears (R), Antithetic shears (R'), and extensional wing-joints (T)
+  masterFracturesList.forEach(mf => {
+    const coords = mf.coords;
+    if (coords.length < 4) return;
+
+    // Select nodal branch points along the master corridor (indices 2, 4, 6)
+    const branchNodes = [2, 4, 6];
+
+    branchNodes.forEach((nodeIdx, bIdx) => {
+      if (nodeIdx >= coords.length - 1) return;
+      const rootCoord = coords[nodeIdx];
+      const prevCoord = coords[nodeIdx - 1];
+
+      // Local tangent vector of master fracture
+      const dLat = rootCoord[0] - prevCoord[0];
+      const dLng = rootCoord[1] - prevCoord[1];
+      const strikeAngle = Math.atan2(dLat, dLng);
+
+      // Branching splay angles according to Andersonian shear mechanics:
+      // R-shear: ~33 deg to 42 deg
+      // R'-shear or T-joint: ~ -41 deg to -48 deg
+      const branchAngleDelta = bIdx % 2 === 0
+        ? (0.58 + ((nodeIdx + bIdx) % 3) * 0.08)
+        : (-0.72 - ((nodeIdx + bIdx) % 2) * 0.12);
+
+      const branchAzimuthRad = strikeAngle + branchAngleDelta;
+      const branchAzimuthDeg = Math.round((branchAzimuthRad * 180 / Math.PI + 360) % 360);
+      const junctionAngleDeg = Math.round(Math.abs(branchAngleDelta * 180 / Math.PI));
+
+      // Generate splay branch line
+      const branchStep = latSpan * 0.038; // approx 40m per segment
+      const numBranchSegments = 4 + (bIdx % 2); // 4-5 segments (~160m - 200m)
+      const branchCoords: [number, number][] = [rootCoord];
+
+      let curLat = rootCoord[0];
+      let curLng = rootCoord[1];
+
+      for (let s = 1; s <= numBranchSegments; s++) {
+        const sinJoint = Math.sin(s * 1.6 + bIdx) * 0.18;
+        const segAngle = branchAzimuthRad + sinJoint;
+        curLat += Math.cos(segAngle) * branchStep;
+        curLng += Math.sin(segAngle) * branchStep * (dx / dy);
+        branchCoords.push([curLat, curLng]);
+      }
+
+      const branchId = `fracture-branch-${mf.id}-${nodeIdx}`;
+      const branchType = bIdx % 2 === 0 ? 'conjugate_shear_splay' : 'extensional_wing_crack';
+
+      pathways.push({
+        id: branchId,
+        type: 'inferred_fracture',
+        streamOrder: 3,
+        coordinates: branchCoords,
+        confidence: 'Moderate',
+        flowAccumulationScore: 22 + bIdx * 4,
+        flowVelocityMPerDay: 0.72,
+        hydraulicGradient: 0.010,
+        depthToWaterM: 6.2,
+        darcyFluxM3PerDay: 135,
+        flowDirectionDeg: branchAzimuthDeg,
+        isFractureBranch: true,
+        parentBranchId: mf.id,
+        fractureBranchType: branchType,
+        fractureApertureMm: 1.4,
+        junctionAngleDeg: junctionAngleDeg,
+        transmissivityM2PerDay: 145,
+        description: `Inferred Subsurface Fracture Branch (${branchType === 'conjugate_shear_splay' ? 'Conjugate Riedel Splay' : 'Extensional Wing Fracture'}) branching at ${junctionAngleDeg}° from ${mf.id}. High secondary fracture porosity corridor.`,
+      });
+
+      fractureBranchCount++;
+      totalBranchLengthM += branchCoords.length * 40;
+
+      // Create high-yield intersection node
+      const hubId = `fracture-hub-${mf.id}-${nodeIdx}`;
+      fractureIntersectionNodes.push({
+        id: hubId,
+        lat: rootCoord[0],
+        lng: rootCoord[1],
+        masterFractureId: mf.id,
+        branchFractureId: branchId,
+        intersectionAngleDeg: junctionAngleDeg,
+        transmissivityEnhancementFactor: 24,
+        flowConvergenceScore: 88,
+        depthToWaterTableM: 5.6,
+        description: `High-yield fracture intersection node between ${mf.id} and ${branchId}. Dilated fracture damage zone provides prime borewell drilling location.`,
+      });
+
+      // Spawn a fine tertiary micro-splay for branchlets
+      if (bIdx === 1 || bIdx === 0) {
+        const microAngle = branchAzimuthRad + (bIdx === 0 ? -0.52 : 0.52);
+        const microCoords: [number, number][] = [
+          branchCoords[branchCoords.length - 2],
+          [
+            branchCoords[branchCoords.length - 2][0] + Math.cos(microAngle) * branchStep * 0.9,
+            branchCoords[branchCoords.length - 2][1] + Math.sin(microAngle) * branchStep * 0.9 * (dx / dy),
+          ],
+        ];
+
+        pathways.push({
+          id: `fracture-microsplay-${mf.id}-${nodeIdx}`,
+          type: 'inferred_fracture',
+          streamOrder: 4,
+          coordinates: microCoords,
+          confidence: 'Moderate',
+          flowAccumulationScore: 12,
+          flowVelocityMPerDay: 0.45,
+          hydraulicGradient: 0.008,
+          depthToWaterM: 6.9,
+          darcyFluxM3PerDay: 65,
+          flowDirectionDeg: Math.round((microAngle * 180 / Math.PI + 360) % 360),
+          isFractureBranch: true,
+          parentBranchId: branchId,
+          fractureBranchType: 'antithetic_splay',
+          fractureApertureMm: 0.8,
+          junctionAngleDeg: 30,
+          transmissivityM2PerDay: 75,
+          description: `Tertiary fracture micro-splay branching from ${branchId}. Localized bedrock joint dilatation.`,
+        });
+
+        fractureBranchCount++;
+        totalBranchLengthM += 40;
+      }
+    });
+  });
+
+  const fractureAnalysis: FractureBranchAnalysis = {
+    totalMasterFractures: numMasterFractures,
+    totalFractureBranches: fractureBranchCount,
+    totalIntersectionNodes: fractureIntersectionNodes.length,
+    primaryShearAzimuths: [
+      `NNW-SSE (Azimuth ${Math.round((lineamentAngle1 * 180 / Math.PI + 360) % 360)}°)`,
+      `ENE-WSW (Azimuth ${Math.round((lineamentAngle2 * 180 / Math.PI + 360) % 360)}°)`,
+    ],
+    meanBranchLengthM: Math.round(totalBranchLengthM / Math.max(1, fractureBranchCount)),
+    dominantFractureMechanism: 'Conjugate Strike-Slip Riedel Shears & Extensional Dilatant Joints',
+    intersectionNodes: fractureIntersectionNodes,
+  };
+
+    const meanSlopeDeg = Math.round((totalSlope / ((gridSize - 2) * (gridSize - 2))) * 10) / 10;
   const drainageDensityKmPerSqKm = Math.round((pathways.length * 0.85) * 10) / 10;
   const meanWaterTableDepthM = Math.round((totalWaterTableDepth / (gridSize * gridSize)) * 10) / 10;
   const meanHydraulicGradient = gradCount > 0 ? Math.round((totalHydraulicGrad / gradCount) * 1000) / 1000 : 0.014;
@@ -468,5 +645,7 @@ export function generateHydrologyAndDrainage(
     regionalFlowDirectionDeg,
     dominantFlowRegime: 'Gravity-Driven Tectonic Fracture & Multi-Tier Deltaic Interflow',
     subsurfacePathwaysCount: pathways.filter(p => p.type === 'subsurface_flow' || p.type === 'palaeochannel' || p.type === 'inferred_fracture').length,
+    fractureAnalysis,
+    fractureIntersectionNodes,
   };
 }
