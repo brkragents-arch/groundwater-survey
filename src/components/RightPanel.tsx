@@ -103,15 +103,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
         </div>
 
         {/* Subsurface Groundwater Flow Status Banner */}
-        <div className="mt-3 p-2.5 bg-slate-950/90 rounded-xl border border-emerald-500/50 text-[11px] space-y-1.5 shadow-md">
+        <div className="mt-3 p-2.5 bg-slate-950/90 rounded-xl border border-cyan-500/40 text-[11px] space-y-1.5 shadow-md">
           <div className="flex items-center justify-between">
-            <span className="font-bold text-emerald-300 flex items-center gap-1.5 text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Subsurface Darcy Groundwater Flows
+            <span className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+              Subsurface Darcy Flows
             </span>
             <button
               onClick={onReanalyseSubsurfaceFlows}
-              className="px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 text-[10px] font-semibold flex items-center gap-1 transition"
+              className="px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 text-[10px] font-semibold flex items-center gap-1 transition"
               title="Recalculate 3D Darcy subsurface groundwater streamlines and hydraulic potential"
             >
               <RefreshCw className="w-2.5 h-2.5" />
@@ -120,23 +120,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
           <div className="grid grid-cols-2 gap-1.5 text-[10.5px] text-slate-300 pt-1 border-t border-slate-900">
             <div>
-              <span className="text-slate-400">Pore Seepage Velocity:</span>{' '}
-              <span className="font-mono text-emerald-300 font-bold">
-                {hydrologyResult.subsurfaceFlowAnalysis?.meanPoreVelocityMPerDay || 1.15} m/day
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-400">Darcy Specific Flux:</span>{' '}
-              <span className="font-mono text-cyan-300 font-bold">
-                {hydrologyResult.subsurfaceFlowAnalysis?.meanDarcyFluxM3PerDay || 210} m³/day
-              </span>
-            </div>
-            <div>
               <span className="text-slate-400">Water Table Depth:</span>{' '}
               <span className="font-mono text-amber-300 font-bold">~{hydrologyResult.meanWaterTableDepthM}m bgl</span>
             </div>
             <div>
-              <span className="text-slate-400">Hydraulic Gradient:</span>{' '}
+              <span className="text-slate-400">Hydraulic Grad:</span>{' '}
               <span className="font-mono text-cyan-300 font-bold">{hydrologyResult.meanHydraulicGradient} m/m</span>
             </div>
             <div>
@@ -144,18 +132,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <span className="font-mono text-slate-200 font-semibold">{hydrologyResult.regionalFlowDirectionDeg}°</span>
             </div>
             <div>
-              <span className="text-slate-400">Active Conduits:</span>{' '}
-              <span className="font-mono text-emerald-400 font-bold">{hydrologyResult.subsurfacePathwaysCount} streamlines</span>
+              <span className="text-slate-400">Conduits Mapped:</span>{' '}
+              <span className="font-mono text-emerald-400 font-bold">{hydrologyResult.subsurfacePathwaysCount} active</span>
             </div>
-          </div>
-          <div className="pt-1 border-t border-slate-900/80 text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Aquifer Transmissivity:</span>
-            <span className="text-emerald-300 font-mono font-bold">
-              {hydrologyResult.subsurfaceFlowAnalysis?.dominantAquiferTransmissivityM2PerDay || 320} m²/day
-            </span>
-          </div>
-          <div className="text-[9.5px] text-emerald-400/80 italic">
-            {hydrologyResult.subsurfaceFlowAnalysis?.flowRegimeDescription || 'Saturated porous media Dupuit-Darcy flow'}
           </div>
         </div>
 

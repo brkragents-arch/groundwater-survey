@@ -14,23 +14,6 @@ export type PathwayType =
   | 'lineament_intersection'
   | 'subsurface_flow';
 
-export interface SubsurfaceFlowAnalysis {
-  totalFlowConduits: number;
-  meanPoreVelocityMPerDay: number;
-  meanDarcyFluxM3PerDay: number;
-  meanHydraulicGradient: number;
-  meanWaterTableDepthM: number;
-  dominantAquiferTransmissivityM2PerDay: number;
-  regionalFlowAzimuthDeg: number;
-  rechargeRateMmPerYear: number;
-  flowRegimeDescription: string;
-  conduitDistribution: {
-    regionalArteries: number;
-    lateralRechargePaths: number;
-    deepInfiltrationConduits: number;
-  };
-}
-
 export interface FractureIntersectionNode {
   id: string;
   lat: number;
@@ -70,10 +53,6 @@ export interface BranchingPathway {
   catchmentAreaAcres?: number;
   channelGradient?: number;
   drainageType?: 'master_valley_thalweg' | 'master_irrigation_canal' | 'collector_tributary' | 'feeder_nullah' | 'ephemeral_gully';
-  // Subsurface hydrodynamic metadata
-  subsurfaceConduitTier?: 'regional_artery' | 'lateral_recharge' | 'deep_percolation';
-  aquiferZone?: string;
-  rechargeMechanism?: string;
 }
 
 export interface BorewellCandidate {

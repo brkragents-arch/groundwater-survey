@@ -40,14 +40,6 @@
   filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.7));
 }
 
-.subsurface-flow-glow {
-  filter: drop-shadow(0 0 4px #10b981) drop-shadow(0 0 1px #34d399);
-}
-
-.subsurface-flow-artery {
-  filter: drop-shadow(0 0 6px #10b981) drop-shadow(0 0 3px #059669);
-}
-
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
