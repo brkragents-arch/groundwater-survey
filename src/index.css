@@ -31,19 +31,6 @@
   filter: drop-shadow(0 0 8px rgba(255, 230, 0, 0.85));
 }
 
-/* Hydraulic head contour labels */
-.head-contour-label span {
-  display: inline-block;
-  transform: translate(-50%, -50%);
-  white-space: nowrap;
-  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #f8fafc;
-  background: rgba(2, 6, 23, 0.7);
-  padding: 1px 4px;
-  border-radius: 3px;
-  pointer-events: none;
-}
-
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

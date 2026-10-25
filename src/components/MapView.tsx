@@ -6,8 +6,8 @@ import {
   SurveyBoundary,
   HistoricalWellRecord,
   CadastralParcel,
+  SubsurfaceFlowContour,
 } from '../types/hydrogeology';
-import type { HeadContour } from '../services/subsurfaceFlowNetwork';
 import {
   Layers,
   Crosshair,
@@ -27,7 +27,7 @@ interface MapViewProps {
   boundary: SurveyBoundary;
   candidates: BorewellCandidate[];
   pathways: BranchingPathway[];
-  headContours?: HeadContour[];
+  contours?: SubsurfaceFlowContour[];
   cadastralParcels: CadastralParcel[];
   selectedCandidateId: string | null;
   onSelectCandidate: (id: string) => void;
@@ -41,7 +41,7 @@ export const MapView: React.FC<MapViewProps> = ({
   boundary,
   candidates,
   pathways,
-  headContours = [],
+  contours = [],
   cadastralParcels,
   selectedCandidateId,
   onSelectCandidate,
@@ -57,8 +57,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const boundaryLayerRef = useRef<L.LayerGroup | null>(null);
   const cadastralLayerRef = useRef<L.LayerGroup | null>(null);
   const pathwaysLayerRef = useRef<L.LayerGroup | null>(null);
-  const contourLabelsLayerRef = useRef<L.LayerGroup | null>(null);
-  const networkRendererRef = useRef<L.Canvas | null>(null);
+  const contoursLayerRef = useRef<L.LayerGroup | null>(null);
   const candidatesLayerRef = useRef<L.LayerGroup | null>(null);
   const wellsLayerRef = useRef<L.LayerGroup | null>(null);
   const drawLayerRef = useRef<L.LayerGroup | null>(null);
@@ -67,8 +66,7 @@ export const MapView: React.FC<MapViewProps> = ({
   // Layer visibility toggles
   const [showSatellite, setShowSatellite] = useState(true);
   const [showCyanNetwork, setShowCyanNetwork] = useState(true);
-  const [showLineaments, setShowLineaments] = useState(true);
-  const [showHeadContours, setShowHeadContours] = useState(true);
+  const [showContours, setShowContours] = useState(true);
   const [showBoundary, setShowBoundary] = useState(true);
   const [showCadastral, setShowCadastral] = useState(true);
   const [showPotentialHeatmap, setShowPotentialHeatmap] = useState(true);
@@ -111,10 +109,8 @@ export const MapView: React.FC<MapViewProps> = ({
     // Create layer groups
     boundaryLayerRef.current = L.layerGroup().addTo(map);
     cadastralLayerRef.current = L.layerGroup().addTo(map);
+    contoursLayerRef.current = L.layerGroup().addTo(map);
     pathwaysLayerRef.current = L.layerGroup().addTo(map);
-    contourLabelsLayerRef.current = L.layerGroup().addTo(map);
-    // Canvas renderer: draws hundreds of branches + casings efficiently
-    networkRendererRef.current = L.canvas({ padding: 0.5, tolerance: 4 });
     candidatesLayerRef.current = L.layerGroup().addTo(map);
     wellsLayerRef.current = L.layerGroup().addTo(map);
     drawLayerRef.current = L.layerGroup().addTo(map);
@@ -290,148 +286,114 @@ export const MapView: React.FC<MapViewProps> = ({
     });
   }, [cadastralParcels, showCadastral]);
 
-  // Render hydraulic-head contours + cyan dendritic subsurface flow network.
-  // Drawn in one pass so contours always sit beneath the network.
+  // Render Cyan Branching Network (Drainage & Lineament Pathways matching reference image)
   useEffect(() => {
-    const layer = pathwaysLayerRef.current;
-    const labels = contourLabelsLayerRef.current;
-    const renderer = networkRendererRef.current;
-    if (!layer || !labels || !renderer) return;
-    layer.clearLayers();
-    labels.clearLayers();
+    if (!pathwaysLayerRef.current) return;
+    pathwaysLayerRef.current.clearLayers();
+    if (!showCyanNetwork) return;
 
-    // 1. Equipotential contours (thin white lines with head labels)
-    if (showHeadContours) {
-      headContours.forEach(hc => {
-        hc.segments.forEach(seg => {
-          L.polyline(seg, {
-            renderer,
-            color: '#f8fafc',
-            weight: 1,
-            opacity: 0.55,
-            interactive: false,
-          }).addTo(layer);
-        });
-        hc.labelPoints.forEach(pt => {
-          L.marker(pt, {
-            interactive: false,
-            icon: L.divIcon({
-              className: 'head-contour-label',
-              html: `<span>${Math.round(hc.level)} m</span>`,
-              iconSize: [0, 0],
-            }),
-          }).addTo(labels);
-        });
+    pathways.forEach(pw => {
+      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow' || pw.type === 'sub_pathway' || pw.type === 'recharge_zone';
+
+      // Stream order thickness hierarchy matching reference image:
+      // Order 1 (major trunk): 3.8px
+      // Order 2 (secondary branch): 2.6px
+      // Order 3 (tertiary sub-pathway): 1.8px
+      // Order 4 (micro-feeder twig): 1.3px
+      let weight = 2.4;
+      if (pw.streamOrder === 1) weight = 3.8;
+      else if (pw.streamOrder === 2) weight = 2.6;
+      else if (pw.streamOrder === 3) weight = 1.8;
+      else weight = 1.3;
+
+      const polyline = L.polyline(pw.coordinates, {
+        color: '#00f3ff', // Radiant solid cyan matching reference image
+        weight,
+        opacity: 0.96,
+        className: 'cyan-network-glow',
       });
-    }
 
-    const buildPopupHtml = (pw: BranchingPathway) => {
       const title = pw.type === 'subsurface_flow'
-        ? `Subsurface Flow Pathway (Order ${pw.streamOrder})`
+        ? 'Subsurface Groundwater Flow Pathway (Darcy Flow)'
         : pw.type === 'sub_pathway'
-        ? `Sub-Pathway Branch (Order ${pw.streamOrder})`
+        ? `Tributary Sub-Pathway Branch (Order ${pw.streamOrder})`
         : pw.type === 'recharge_zone'
         ? 'Recharge Zone Infiltration Swale'
         : pw.type === 'palaeochannel'
-        ? 'Inferred Buried Palaeochannel Corridor (Dashed Cyan)'
+        ? 'Buried Palaeochannel Aquifer Corridor'
         : pw.type === 'inferred_fracture'
-        ? 'Geological Lineament & Fractured-Rock Corridor (Dashed Cyan)'
-        : `Drainage Pathway (Order ${pw.streamOrder})`;
+        ? 'Tectonic Structural Fracture Corridor'
+        : `Primary Drainage Pathway (Order ${pw.streamOrder})`;
 
-      return `
+      polyline.bindPopup(`
         <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[240px]">
           <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
-            <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
             <span>${title}</span>
           </div>
           <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
           <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
             <div>Confidence: <span class="text-slate-200 font-semibold">${pw.confidence}</span></div>
-            ${pw.flowDirectionDeg !== undefined ? `<div>Azimuth: <span class="text-cyan-300 font-mono font-bold">${pw.flowDirectionDeg}°</span></div>` : ''}
-            ${pw.flowVelocityMPerDay !== undefined ? `<div>Est. Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>` : ''}
+            <div>Flow Score: <span class="text-cyan-300 font-mono font-bold">${pw.flowAccumulationScore}</span></div>
+            ${pw.flowVelocityMPerDay !== undefined ? `<div>Darcy Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>` : ''}
             ${pw.hydraulicGradient !== undefined ? `<div>Hydraulic Grad: <span class="text-cyan-200 font-mono">${pw.hydraulicGradient} m/m</span></div>` : ''}
-            ${pw.depthToWaterM !== undefined ? `<div>Model WT Depth: <span class="text-amber-300 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>` : ''}
-            ${pw.darcyFluxM3PerDay !== undefined ? `<div>Est. Flux: <span class="text-blue-300 font-mono font-bold">${pw.darcyFluxM3PerDay} m³/day</span></div>` : ''}
+            ${pw.depthToWaterM !== undefined ? `<div>Water Table Depth: <span class="text-amber-300 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>` : ''}
+            ${pw.darcyFluxM3PerDay !== undefined ? `<div>Darcy Flux: <span class="text-blue-300 font-mono font-bold">${pw.darcyFluxM3PerDay} m³/day</span></div>` : ''}
           </div>
         </div>
-      `;
-    };
+      `);
 
-    const flowPathways = pathways.filter(
-      pw => pw.type !== 'inferred_fracture' && pw.type !== 'palaeochannel'
-    );
-    const structuralPathways = pathways.filter(
-      pw => pw.type === 'inferred_fracture' || pw.type === 'palaeochannel'
-    );
+      polyline.addTo(pathwaysLayerRef.current!);
+    });
+  }, [pathways, showCyanNetwork]);
 
-    // 2. Solid Cyan Dendritic Subsurface Flow Network (Orders 4 -> 1)
-    if (showCyanNetwork) {
-      const sortedFlow = [...flowPathways].sort((a, b) => b.streamOrder - a.streamOrder);
-      sortedFlow.forEach(pw => {
-        const weight = pw.streamOrder === 1 ? 4.2 : pw.streamOrder === 2 ? 3.0 : pw.streamOrder === 3 ? 2.0 : 1.4;
+  // Render Subsurface Groundwater Flow & Hydraulic Head Contours
+  // Clearly visible contours matching the perspective satellite reference image!
+  useEffect(() => {
+    if (!contoursLayerRef.current) return;
+    contoursLayerRef.current.clearLayers();
+    if (!showContours || !contours || contours.length === 0) return;
 
-        // Dark casing underneath gives contrast on bright/varied satellite imagery
-        L.polyline(pw.coordinates, {
-          renderer,
-          color: '#002b33',
-          weight: weight + 2.4,
-          opacity: 0.55,
-          lineCap: 'round',
-          lineJoin: 'round',
-          interactive: false,
-        }).addTo(layer);
+    contours.forEach(contour => {
+      const isIndex = contour.isIndexContour;
 
-        const polyline = L.polyline(pw.coordinates, {
-          renderer,
-          color: '#00f3ff', // Radiant cyan matching reference image
-          weight,
-          opacity: 1,
-          lineCap: 'round',
-          lineJoin: 'round',
+      // Subtle, elegant sky blue/cyan contour styling
+      const polyline = L.polyline(contour.coordinates, {
+        color: isIndex ? '#38bdf8' : '#0ea5e9', // Sky blue for index, cyan for intermediate
+        weight: isIndex ? 1.8 : 1.1,
+        opacity: isIndex ? 0.75 : 0.45,
+        dashArray: isIndex ? undefined : '5, 4',
+      });
+
+      polyline.bindTooltip(
+        `<div class="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-slate-950 text-cyan-300 border border-cyan-500/50 rounded shadow-md">
+          Head Equipotential: ${contour.elevationM}m AMSL | Depth: ~${contour.depthBglM}m bgl
+        </div>`,
+        { sticky: true, className: 'contour-tooltip' }
+      );
+
+      polyline.addTo(contoursLayerRef.current!);
+
+      // Small elevation badge on index contours
+      if (isIndex && contour.coordinates.length >= 4) {
+        const midIdx = Math.floor(contour.coordinates.length / 2);
+        const midPt = contour.coordinates[midIdx];
+
+        const labelIcon = L.divIcon({
+          className: 'contour-label-marker',
+          html: `
+            <div class="bg-slate-950/90 text-sky-300 border border-sky-400/50 font-mono font-bold text-[8.5px] px-1.5 py-0.2 rounded shadow whitespace-nowrap -translate-x-1/2 -translate-y-1/2">
+              ${contour.elevationM}m
+            </div>
+          `,
+          iconSize: [0, 0],
         });
 
-        polyline.bindPopup(buildPopupHtml(pw));
-        polyline.addTo(layer);
-      });
-    }
-
-    // 3. Dashed Cyan Geological Lineaments, Fractured-Rock Corridors & Buried Palaeochannels
-    // Drawn ON TOP of the solid network with a continuous dark corridor backing and 'butt' lineCaps
-    // so every cyan dash and dark gap is crisp and unmistakable.
-    if (showLineaments) {
-      const sortedStructural = [...structuralPathways].sort((a, b) => b.streamOrder - a.streamOrder);
-      sortedStructural.forEach(pw => {
-        const isPrimaryCorridor = pw.streamOrder === 1;
-        const weight = isPrimaryCorridor ? 3.6 : 2.6;
-        const dashPattern = pw.type === 'palaeochannel' ? '16, 9, 5, 9' : '14, 9';
-
-        // Continuous dark corridor backing so dash gaps stay dark even over solid cyan lines
-        L.polyline(pw.coordinates, {
-          renderer,
-          color: '#020617',
-          weight: weight + 3.2,
-          opacity: 0.82,
-          lineCap: 'butt',
-          lineJoin: 'round',
-          interactive: false,
-        }).addTo(layer);
-
-        // Crisp dashed cyan lineament / fractured-rock corridor stroke
-        const polyline = L.polyline(pw.coordinates, {
-          renderer,
-          color: '#00f3ff',
-          weight,
-          opacity: 1,
-          lineCap: 'butt',
-          lineJoin: 'round',
-          dashArray: dashPattern,
-        });
-
-        polyline.bindPopup(buildPopupHtml(pw));
-        polyline.addTo(layer);
-      });
-    }
-  }, [pathways, headContours, showCyanNetwork, showLineaments, showHeadContours]);
+        const labelMarker = L.marker(midPt, { icon: labelIcon, interactive: false });
+        labelMarker.addTo(contoursLayerRef.current!);
+      }
+    });
+  }, [contours, showContours]);
 
   // Render Top 3 Borewell Candidate Pins (Point 1: Gold/Red, Point 2: Blue, Point 3: Green)
   useEffect(() => {
@@ -659,8 +621,8 @@ export const MapView: React.FC<MapViewProps> = ({
               {/* Cyan Branching Network */}
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
-                  <span className="w-3.5 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
-                  <span>Subsurface Flow Network (Solid Cyan)</span>
+                  <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
+                  <span>Cyan Drainage & Lineaments</span>
                 </span>
                 <input
                   type="checkbox"
@@ -670,31 +632,17 @@ export const MapView: React.FC<MapViewProps> = ({
                 />
               </label>
 
-              {/* Dashed Cyan Geological Lineaments & Fractured-Rock Corridors */}
+              {/* Subsurface Flow & Hydraulic Head Contours */}
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
-                  <span className="w-3.5 border-b-2 border-dashed border-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
-                  <span className="text-cyan-300 font-medium">Lineaments & Fractures (Dashed Cyan)</span>
+                  <span className="w-3 h-0.5 bg-sky-400 shadow-[0_0_4px_#38bdf8]"></span>
+                  <span className="text-sky-300 font-medium">Subsurface Flow Contours</span>
                 </span>
                 <input
                   type="checkbox"
-                  checked={showLineaments}
-                  onChange={e => setShowLineaments(e.target.checked)}
-                  className="accent-cyan-400 rounded"
-                />
-              </label>
-
-              {/* Hydraulic Head Contours */}
-              <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-px bg-slate-100"></span>
-                  <span>Hydraulic Head Contours</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={showHeadContours}
-                  onChange={e => setShowHeadContours(e.target.checked)}
-                  className="accent-slate-200 rounded"
+                  checked={showContours}
+                  onChange={e => setShowContours(e.target.checked)}
+                  className="accent-sky-400 rounded"
                 />
               </label>
 
@@ -830,18 +778,8 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="w-7 h-0.5 bg-cyan-400 shadow-[0_0_8px_#00f3ff] rounded-full shrink-0"></div>
               <div>
                 <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
-                <span className="text-slate-300">Subsurface Flow Network (Orders 1–4)</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Thick = trunks, thin = sub-pathways; traced along modelled hydraulic-head gradient</p>
-              </div>
-            </div>
-
-            {/* Head contours */}
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-px bg-slate-100 shrink-0"></div>
-              <div>
-                <span className="text-slate-100 font-semibold">White Lines:</span>{' '}
-                <span className="text-slate-300">Hydraulic Head Contours (m)</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Modelled equipotentials; flow crosses them at right angles, high → low</p>
+                <span className="text-slate-300">Surface Drainage & Flow Pathways</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Terrain convergence channels, nullahs & runoff gullies (D8 flow routing)</p>
               </div>
             </div>
 
@@ -850,8 +788,18 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="w-7 border-b-2 border-dashed border-cyan-400 shadow-[0_0_8px_#00f3ff] shrink-0"></div>
               <div>
                 <span className="text-cyan-300 font-semibold">Dashed Cyan:</span>{' '}
-                <span className="text-slate-300">Geological Lineaments & Fractured-Rock Corridors</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Tectonic shear corridors, conjugate fracture splays & buried palaeochannels (verify via 1D VES / 2D ERT)</p>
+                <span className="text-slate-300">Inferred Subsurface Fractures</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Tectonic shear corridors, lineaments & palaeochannels (requires VES confirmation)</p>
+              </div>
+            </div>
+
+            {/* Subsurface Flow & Hydraulic Head Contours */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-0.5 bg-sky-400 shadow-[0_0_6px_#38bdf8] rounded-full shrink-0"></div>
+              <div>
+                <span className="text-sky-300 font-semibold">Sky Blue Contours:</span>{' '}
+                <span className="text-slate-300">Subsurface Hydraulic Head Equipotentials</span>
+                <p className="text-[10px] text-slate-400 leading-tight">Groundwater table elevation contours (H = Z - Dwt); flow is perpendicular to lines</p>
               </div>
             </div>
 

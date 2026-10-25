@@ -16,6 +16,14 @@ export type PathwayType =
   | 'sub_pathway'
   | 'recharge_zone';
 
+export interface SubsurfaceFlowContour {
+  id: string;
+  elevationM: number; // Water table / hydraulic head elevation (AMSL)
+  depthBglM: number; // Depth below ground surface (m bgl)
+  isIndexContour: boolean; // Major index contour (e.g. every 10m or 5m)
+  coordinates: [number, number][]; // Line coordinates [lat, lng]
+}
+
 export interface BranchingPathway {
   id: string;
   type: PathwayType;

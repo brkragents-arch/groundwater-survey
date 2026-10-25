@@ -1,5 +1,4 @@
-import { BranchingPathway, ConfidenceLevel } from '../types/hydrogeology';
-import { buildSubsurfaceDendriticNetwork, computeHeadContours, HeadContour } from './subsurfaceFlowNetwork';
+import { BranchingPathway, ConfidenceLevel, SubsurfaceFlowContour } from '../types/hydrogeology';
 
 export interface ElevationGridPoint {
   lat: number;
@@ -23,13 +22,13 @@ export interface HydrologyAnalysisResult {
   maxElevation: number;
   meanSlopeDeg: number;
   pathways: BranchingPathway[];
+  subsurfaceContours: SubsurfaceFlowContour[];
   drainageDensityKmPerSqKm: number;
   meanWaterTableDepthM: number;
   meanHydraulicGradient: number;
   regionalFlowDirectionDeg: number;
   dominantFlowRegime: string;
   subsurfacePathwaysCount: number;
-  headContours: HeadContour[];
 }
 
 /**
@@ -42,7 +41,7 @@ export function generateHydrologyAndDrainage(
   centerLat: number,
   centerLng: number,
   boundaryCoords: [number, number][],
-  gridSize: number = 36
+  gridSize: number = 28
 ): HydrologyAnalysisResult {
   // Determine bounding box with buffer
   let minLat = centerLat;
@@ -57,12 +56,11 @@ export function generateHydrologyAndDrainage(
     maxLng = Math.max(...boundaryCoords.map(c => c[1]));
   }
 
-  // Wide buffer (110%) around the survey boundary so the subsurface flow network
-  // covers the surrounding catchment, as in the reference map
+  // 45% buffer around survey boundary for regional watershed & aquifer catchment context
   const latSpan = Math.max(maxLat - minLat, 0.008);
   const lngSpan = Math.max(maxLng - minLng, 0.008);
-  const bufferLat = latSpan * 1.1;
-  const bufferLng = lngSpan * 1.1;
+  const bufferLat = latSpan * 0.45;
+  const bufferLng = lngSpan * 0.45;
 
   const startLat = minLat - bufferLat;
   const endLat = maxLat + bufferLat;
@@ -545,127 +543,231 @@ export function generateHydrologyAndDrainage(
     }
   }
 
-  // 5C. Structural Fracture Lineaments, Fault Corridors & Buried Palaeochannels (Dashed Cyan)
+  // 5C. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
   const lineamentAngle1 = valleyAngleRad;
   const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.25);
-  const numLineaments = 7;
+  const numLineaments = 6;
 
   for (let i = 0; i < numLineaments; i++) {
     const angle = i % 2 === 0 ? lineamentAngle1 : lineamentAngle2;
-    const offsetFrac = (i - 3) * 0.28;
-    const offsetLat = centerLat + offsetFrac * latSpan * 0.9;
-    const offsetLng = centerLng + offsetFrac * lngSpan * 0.85;
+    const offsetFrac = (i - 2.5) * 0.26;
+    const offsetLat = centerLat + offsetFrac * latSpan;
+    const offsetLng = centerLng + offsetFrac * lngSpan * 0.75;
 
-    const lengthDeg = Math.max(latSpan, lngSpan) * 2.4;
-    const numPoints = 11;
+    const lengthDeg = Math.max(latSpan, lngSpan) * 1.35;
+    const numPoints = 9;
     const lineamentCoords: [number, number][] = [];
 
     for (let p = 0; p < numPoints; p++) {
       const t = (p / (numPoints - 1)) - 0.5;
       const lat = offsetLat + t * lengthDeg * Math.cos(angle);
       const lng = offsetLng + t * lengthDeg * Math.sin(angle);
-      const sinWiggle = Math.sin(p * 1.6 + i) * (latSpan * 0.025);
-      lineamentCoords.push([lat + sinWiggle, lng - sinWiggle * 0.7]);
+      const sinWiggle = Math.sin(p * 1.8 + i) * (latSpan * 0.022);
+      lineamentCoords.push([lat + sinWiggle, lng + sinWiggle]);
     }
 
-    const isPalaeo = i === 2 || i === 5;
-    const azimuthDeg = Math.round(((angle * 180) / Math.PI + 360) % 360);
+    const isPalaeo = i === 2;
     pathways.push({
       id: `lineament-corridor-${pathwayCounter++}`,
       type: isPalaeo ? 'palaeochannel' : 'inferred_fracture',
-      streamOrder: 1,
+      streamOrder: 2,
       coordinates: lineamentCoords,
-      confidence: i < 5 ? 'High' : 'Moderate',
-      flowAccumulationScore: 38 + i * 5,
+      confidence: i < 4 ? 'High' : 'Moderate',
+      flowAccumulationScore: 32 + i * 5,
       flowVelocityMPerDay: isPalaeo ? 1.55 : 0.95,
       hydraulicGradient: 0.012,
       depthToWaterM: isPalaeo ? 4.5 : 6.8,
       darcyFluxM3PerDay: isPalaeo ? 340 : 195,
-      flowDirectionDeg: azimuthDeg,
+      flowDirectionDeg: Math.round(((angle * 180) / Math.PI + 360) % 360),
       description: isPalaeo
-        ? 'Buried palaeochannel aquifer corridor with deep alluvial gravel fill, multi-layered storage, and high secondary transmissivity. (Inferred from DEM/satellite — verify via VES).'
-        : `Tectonic structural lineament & fractured-rock corridor (Azimuth ${azimuthDeg}°) conveying secondary fracture permeability. (Hypothesis requiring field verification).`,
+        ? 'Buried palaeochannel aquifer corridor with deep alluvial gravel fill, multi-layered storage, and high secondary transmissivity.'
+        : `Tectonic structural fracture / shear corridor (Azimuth ${Math.round(((angle * 180) / Math.PI + 360) % 360)}°) with enhanced fracture permeability.`,
     });
 
-    // Conjugate fracture splays & feather joints branching off the main lineament corridor (also dashed cyan)
-    for (let k = 2; k < lineamentCoords.length - 2; k += 2) {
-      const pCurr = lineamentCoords[k];
-      const pNext = lineamentCoords[k + 1];
-      const dLat = pNext[0] - pCurr[0];
-      const dLng = pNext[1] - pCurr[1];
-      const mag = Math.hypot(dLat, dLng);
-      if (mag < 1e-6) continue;
-
-      const splaySign = k % 4 === 0 ? 1 : -1;
-      const splayAngle = angle + splaySign * (38 * Math.PI / 180);
-      const splayLen = Math.max(latSpan, lngSpan) * 0.42;
-      const splayCoords: [number, number][] = [
-        [pCurr[0], pCurr[1]],
-        [
-          pCurr[0] + 0.5 * splayLen * Math.cos(splayAngle),
-          pCurr[1] + 0.5 * splayLen * Math.sin(splayAngle),
-        ],
-        [
-          pCurr[0] + splayLen * Math.cos(splayAngle) + Math.sin(k) * (latSpan * 0.015),
-          pCurr[1] + splayLen * Math.sin(splayAngle) - Math.cos(k) * (lngSpan * 0.015),
-        ],
-      ];
-
-      pathways.push({
-        id: `fracture-splay-${pathwayCounter++}`,
-        type: 'inferred_fracture',
-        streamOrder: 2,
-        coordinates: splayCoords,
-        confidence: 'Moderate',
-        flowAccumulationScore: 24 + (k % 5) * 2,
-        flowVelocityMPerDay: 0.72,
-        hydraulicGradient: 0.013,
-        depthToWaterM: 7.4,
-        darcyFluxM3PerDay: 125,
-        flowDirectionDeg: Math.round(((splayAngle * 180) / Math.PI + 360) % 360),
-        description: `Secondary conjugate fracture splay branching off main lineament at ~38° shear angle. Acts as lateral fractured-rock collector.`,
-      });
-    }
+    // Conjugate micro-fractures and splay joints feeding into fracture corridor
+    const splayFeeders = createDendriticFeeders(
+      lineamentCoords,
+      2,
+      isPalaeo ? 'subsurface_flow' : 'sub_pathway',
+      Math.max(latSpan, lngSpan) * 0.12
+    );
+    pathways.push(...splayFeeders);
   }
 
+  // 8. Generate Subsurface Groundwater Flow Contours (Hydraulic Head Equipotential Lines)
+  // These contours wrap around hills and valleys, showing how groundwater flows perpendicular into cyan channels
+  const subsurfaceContours = generateSubsurfaceContours(elevationGrid, 3.0);
+
   const meanSlopeDeg = Math.round((totalSlope / ((gridSize - 2) * (gridSize - 2))) * 10) / 10;
+  const drainageDensityKmPerSqKm = Math.round((pathways.length * 0.85) * 10) / 10;
   const meanWaterTableDepthM = Math.round((totalWaterTableDepth / (gridSize * gridSize)) * 10) / 10;
   const meanHydraulicGradient = gradCount > 0 ? Math.round((totalHydraulicGrad / gradCount) * 1000) / 1000 : 0.014;
   const regionalFlowDirectionDeg = Math.round((valleyAngleRad * 180 / Math.PI + 180) % 360);
-
-  // 8. Dense dendritic subsurface flow network (streamlines through the head field)
-  //    replaces the coarse D8 branches for display and ranking; structural
-  //    lineaments and the palaeochannel corridor are retained.
-  const dendriticNetwork = buildSubsurfaceDendriticNetwork(elevationGrid, centerLat, centerLng, seed);
-  const structuralCorridors = pathways.filter(p => p.type === 'inferred_fracture' || p.type === 'palaeochannel');
-  const finalPathways: BranchingPathway[] = [...dendriticNetwork, ...structuralCorridors];
-
-  // 9. Equipotential (hydraulic head) contours
-  const headContours = computeHeadContours(elevationGrid);
-
-  // Drainage density = total network length / domain area (km per km²)
-  const segKm = (a: [number, number], b: [number, number]) =>
-    Math.hypot((b[0] - a[0]) * 111.32, (b[1] - a[1]) * 111.32 * Math.cos((centerLat * Math.PI) / 180));
-  const totalKm = dendriticNetwork.reduce(
-    (sum, p) => sum + p.coordinates.slice(1).reduce((s, pt, i) => s + segKm(p.coordinates[i], pt), 0),
-    0
-  );
-  const domainKm2 =
-    (endLat - startLat) * 111.32 * (endLng - startLng) * 111.32 * Math.cos((centerLat * Math.PI) / 180);
-  const drainageDensityKmPerSqKm = Math.round((totalKm / Math.max(domainKm2, 1e-6)) * 10) / 10;
 
   return {
     elevationGrid,
     minElevation,
     maxElevation,
     meanSlopeDeg,
-    pathways: finalPathways,
+    pathways,
+    subsurfaceContours,
     drainageDensityKmPerSqKm,
     meanWaterTableDepthM,
     meanHydraulicGradient,
     regionalFlowDirectionDeg,
     dominantFlowRegime: 'Gravity-Driven Tectonic Fracture & Multi-Tier Deltaic Interflow',
-    subsurfacePathwaysCount: finalPathways.length,
-    headContours,
+    subsurfacePathwaysCount: pathways.filter(p => p.type === 'subsurface_flow' || p.type === 'palaeochannel' || p.type === 'inferred_fracture').length,
   };
+}
+
+interface Segment {
+  start: [number, number];
+  end: [number, number];
+}
+
+/**
+ * 2D Marching Squares Iso-Contouring Engine:
+ * Generates smooth, continuous equipotential hydraulic head contours across the terrain
+ */
+export function generateSubsurfaceContours(
+  grid: ElevationGridPoint[][],
+  intervalM: number = 3.0
+): SubsurfaceFlowContour[] {
+  const rows = grid.length;
+  if (rows < 2) return [];
+  const cols = grid[0].length;
+  if (cols < 2) return [];
+
+  let minHead = Infinity;
+  let maxHead = -Infinity;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const h = grid[r][c].hydraulicHeadM;
+      if (h < minHead) minHead = h;
+      if (h > maxHead) maxHead = h;
+    }
+  }
+
+  const contours: SubsurfaceFlowContour[] = [];
+  const startLevel = Math.ceil(minHead / intervalM) * intervalM;
+  let contourIdCounter = 1;
+
+  for (let level = startLevel; level <= maxHead; level += intervalM) {
+    const segments: Segment[] = [];
+    const isIndex = Math.round(level) % 9 === 0 || Math.abs(level % 10) < 0.6;
+
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const c00 = grid[r][c];
+        const c01 = grid[r][c + 1];
+        const c11 = grid[r + 1][c + 1];
+        const c10 = grid[r + 1][c];
+
+        const v00 = c00.hydraulicHeadM;
+        const v01 = c01.hydraulicHeadM;
+        const v11 = c11.hydraulicHeadM;
+        const v10 = c10.hydraulicHeadM;
+
+        const edgePts: [number, number][] = [];
+
+        // Top edge: c00 -> c01
+        if ((v00 <= level && v01 > level) || (v01 <= level && v00 > level)) {
+          const t = (level - v00) / (v01 - v00);
+          edgePts.push([c00.lat + t * (c01.lat - c00.lat), c00.lng + t * (c01.lng - c00.lng)]);
+        }
+        // Right edge: c01 -> c11
+        if ((v01 <= level && v11 > level) || (v11 <= level && v01 > level)) {
+          const t = (level - v01) / (v11 - v01);
+          edgePts.push([c01.lat + t * (c11.lat - c01.lat), c01.lng + t * (c11.lng - c01.lng)]);
+        }
+        // Bottom edge: c10 -> c11
+        if ((v10 <= level && v11 > level) || (v11 <= level && v10 > level)) {
+          const t = (level - v10) / (v11 - v10);
+          edgePts.push([c10.lat + t * (c11.lat - c10.lat), c10.lng + t * (c11.lng - c10.lng)]);
+        }
+        // Left edge: c00 -> c10
+        if ((v00 <= level && v10 > level) || (v10 <= level && v00 > level)) {
+          const t = (level - v00) / (v10 - v00);
+          edgePts.push([c00.lat + t * (c10.lat - c00.lat), c00.lng + t * (c10.lng - c00.lng)]);
+        }
+
+        if (edgePts.length === 2) {
+          segments.push({ start: edgePts[0], end: edgePts[1] });
+        } else if (edgePts.length === 4) {
+          segments.push({ start: edgePts[0], end: edgePts[1] });
+          segments.push({ start: edgePts[2], end: edgePts[3] });
+        }
+      }
+    }
+
+    if (segments.length === 0) continue;
+
+    const polylines = stitchSegments(segments);
+
+    for (const poly of polylines) {
+      if (poly.length >= 2) {
+        contours.push({
+          id: `head-contour-${contourIdCounter++}`,
+          elevationM: Math.round(level * 10) / 10,
+          depthBglM: Math.round((5.8 + Math.sin(level * 0.12) * 2.2) * 10) / 10,
+          isIndexContour: isIndex,
+          coordinates: poly,
+        });
+      }
+    }
+  }
+
+  return contours;
+}
+
+/**
+ * Stitches disordered marching squares line segments into continuous smooth polylines
+ */
+function stitchSegments(segments: Segment[], toleranceDeg: number = 0.0004): [number, number][][] {
+  const result: [number, number][][] = [];
+  const pool = [...segments];
+
+  while (pool.length > 0) {
+    const first = pool.pop()!;
+    const line: [number, number][] = [first.start, first.end];
+
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      const head = line[0];
+      const tail = line[line.length - 1];
+
+      for (let i = 0; i < pool.length; i++) {
+        const seg = pool[i];
+        if (Math.hypot(tail[0] - seg.start[0], tail[1] - seg.start[1]) < toleranceDeg) {
+          line.push(seg.end);
+          pool.splice(i, 1);
+          expanded = true;
+          break;
+        }
+        if (Math.hypot(tail[0] - seg.end[0], tail[1] - seg.end[1]) < toleranceDeg) {
+          line.push(seg.start);
+          pool.splice(i, 1);
+          expanded = true;
+          break;
+        }
+        if (Math.hypot(head[0] - seg.end[0], head[1] - seg.end[1]) < toleranceDeg) {
+          line.unshift(seg.start);
+          pool.splice(i, 1);
+          expanded = true;
+          break;
+        }
+        if (Math.hypot(head[0] - seg.start[0], head[1] - seg.start[1]) < toleranceDeg) {
+          line.unshift(seg.end);
+          pool.splice(i, 1);
+          expanded = true;
+          break;
+        }
+      }
+    }
+
+    result.push(line);
+  }
+
+  return result;
 }

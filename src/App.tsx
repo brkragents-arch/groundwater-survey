@@ -382,7 +382,7 @@ export function App() {
             boundary={boundary}
             candidates={candidates}
             pathways={hydrologyResult.pathways}
-            headContours={hydrologyResult.headContours}
+            contours={hydrologyResult.subsurfaceContours}
             cadastralParcels={cadastralParcels}
             selectedCandidateId={selectedCandidateId}
             onSelectCandidate={id => setSelectedCandidateId(id)}
