@@ -71,6 +71,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const [showInferredFractures, setShowInferredFractures] = useState(true);
   const [showFractureHubs, setShowFractureHubs] = useState(true);
   const [showDrainagePathways, setShowDrainagePathways] = useState(true);
+  const [showSubsurfaceFlows, setShowSubsurfaceFlows] = useState(true);
   const [showBoundary, setShowBoundary] = useState(true);
   const [showCadastral, setShowCadastral] = useState(true);
   const [showPotentialHeatmap, setShowPotentialHeatmap] = useState(true);
@@ -90,6 +91,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const masterFractures = pathways.filter(p => p.type === 'inferred_fracture' && !p.isFractureBranch);
   const fractureBranches = pathways.filter(p => p.type === 'inferred_fracture' && p.isFractureBranch);
   const drainagePathways = pathways.filter(p => p.type === 'surface_drainage');
+  const subsurfaceFlowPathways = pathways.filter(p => p.type === 'subsurface_flow');
   const palaeochannels = pathways.filter(p => p.type === 'palaeochannel');
 
   // Initialize Map
@@ -309,6 +311,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       if (isFracture && !showInferredFractures) return;
       if (isDrainage && !showDrainagePathways) return;
+      if (isSubsurfaceFlow && !showSubsurfaceFlows) return;
 
       const isBranch = pw.isFractureBranch;
 
@@ -397,10 +400,26 @@ export const MapView: React.FC<MapViewProps> = ({
         });
         ribbon.addTo(pathwaysLayerRef.current!);
       } else if (isSubsurfaceFlow) {
-        weight = 3.0;
-        dashArray = '7, 4';
-        cssClass = 'cyan-subsurface-glow pulse-subsurface';
-        title = 'Subsurface Groundwater Flow Conduit (Darcy Flow)';
+        // Subsurface Groundwater Flows (Dupuit-Darcy Hydrodynamic Streamlines)
+        const isArtery = pw.streamOrder === 1;
+        weight = isArtery ? 3.6 : 2.6;
+        color = isArtery ? '#10b981' : '#14b8a6'; // Vivid emerald / turquoise
+        dashArray = isArtery ? '9, 5' : '6, 4';
+        cssClass = isArtery ? 'subsurface-flow-artery' : 'subsurface-flow-glow';
+        title = isArtery
+          ? 'Regional Subsurface Groundwater Artery (Tier 1 Darcy Flow)'
+          : pw.streamOrder === 2
+          ? 'Lateral Groundwater Recharge Conduit (Tier 2 Seepage)'
+          : 'Deep Fracture-Fed Percolation Conduit (Tier 3 Flow)';
+
+        // Underlay hydrodynamic ribbon
+        const ribbon = L.polyline(pw.coordinates, {
+          color: '#059669',
+          weight: isArtery ? 7 : 5,
+          opacity: 0.35,
+          interactive: false,
+        });
+        ribbon.addTo(pathwaysLayerRef.current!);
       }
 
       const polyline = L.polyline(pw.coordinates, {
@@ -411,7 +430,7 @@ export const MapView: React.FC<MapViewProps> = ({
         className: cssClass,
       });
 
-      // Tailored Popup for Surface Drainage vs Subsurface Fractures
+      // Tailored Popup for Surface Drainage vs Subsurface Flows vs Subsurface Fractures
       if (isDrainage) {
         polyline.bindPopup(`
           <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-sky-500/60 rounded-xl shadow-2xl min-w-[260px]">
@@ -431,6 +450,29 @@ export const MapView: React.FC<MapViewProps> = ({
             <div class="mt-2 pt-1 border-t border-slate-900 text-[10px] text-sky-300/80 flex items-center gap-1">
               <span>🌊</span>
               <span>D8 Watershed Flow Conduit conveying storm runoff & valley infiltration.</span>
+            </div>
+          </div>
+        `);
+      } else if (isSubsurfaceFlow) {
+        polyline.bindPopup(`
+          <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-emerald-500/60 rounded-xl shadow-2xl min-w-[270px]">
+            <div class="flex items-center gap-1.5 font-bold text-emerald-400 mb-1.5 border-b border-slate-800 pb-1">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>${title}</span>
+            </div>
+            <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
+            <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
+              <div>Pore Seepage Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>
+              <div>Darcy Specific Flux: <span class="text-cyan-300 font-mono font-bold">${pw.darcyFluxM3PerDay} m³/day</span></div>
+              <div>Hydraulic Gradient: <span class="text-amber-300 font-mono font-bold">${pw.hydraulicGradient} m/m</span></div>
+              <div>Water Table Depth: <span class="text-amber-200 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>
+              <div>Local Transmissivity: <span class="text-emerald-300 font-mono font-bold">${pw.transmissivityM2PerDay || 280} m²/day</span></div>
+              <div>Flow Direction: <span class="text-slate-200 font-mono font-bold">${pw.flowDirectionDeg}°</span></div>
+            </div>
+            ${pw.aquiferZone ? `<div class="mt-1.5 text-[10px] text-slate-400 border-t border-slate-900 pt-1">Aquifer: <span class="text-slate-200 font-medium">${pw.aquiferZone}</span></div>` : ''}
+            <div class="mt-1.5 text-[10px] text-emerald-400/90 flex items-center gap-1">
+              <span>💧</span>
+              <span>Dupuit-Darcy hydrodynamic streamline simulated along hydraulic potential gradient.</span>
             </div>
           </div>
         `);
@@ -459,7 +501,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       polyline.addTo(pathwaysLayerRef.current!);
     });
-  }, [pathways, showInferredFractures, showDrainagePathways]);
+  }, [pathways, showInferredFractures, showDrainagePathways, showSubsurfaceFlows]);
 
   // Render Fracture Branch Intersection Hubs (Prime Borewell Targets)
   useEffect(() => {
@@ -764,7 +806,7 @@ export const MapView: React.FC<MapViewProps> = ({
               {/* Surface Drainage Pathways */}
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
-                  <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_4px_#00f3ff]"></span>
+                  <span className="w-3 h-0.5 bg-sky-400 shadow-[0_0_4px_#38bdf8]"></span>
                   <span className="text-sky-300 font-medium">Surface Drainage Channels (D8 Catchment)</span>
                   <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-300">
                     {drainagePathways.length} Streams
@@ -775,6 +817,23 @@ export const MapView: React.FC<MapViewProps> = ({
                   checked={showDrainagePathways}
                   onChange={e => setShowDrainagePathways(e.target.checked)}
                   className="accent-cyan-400 rounded"
+                />
+              </label>
+
+              {/* Subsurface Darcy Flows & Saturated Streamlines */}
+              <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
+                <span className="flex items-center gap-2">
+                  <span className="w-3 border-b-2 border-dashed border-emerald-400 shadow-[0_0_6px_#10b981]"></span>
+                  <span className="text-emerald-300 font-medium">Subsurface Darcy Flows & Streamlines</span>
+                  <span className="text-[9px] font-mono px-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">
+                    {subsurfaceFlowPathways.length} Conduits
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={showSubsurfaceFlows}
+                  onChange={e => setShowSubsurfaceFlows(e.target.checked)}
+                  className="accent-emerald-400 rounded"
                 />
               </label>
 

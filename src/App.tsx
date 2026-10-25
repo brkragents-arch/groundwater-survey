@@ -198,7 +198,7 @@ export function App() {
       setSelectedCandidateId(top3[0]?.id || null);
       setIsAnalyzing(false);
       setToastMessage(
-        `Subsurface fractures & flows re-analysed: ${hydro.fractureAnalysis?.totalMasterFractures || 5} master corridors, ${hydro.fractureAnalysis?.totalFractureBranches || 15} branches & ${hydro.fractureIntersectionNodes?.length || 0} high-yield drilling hubs mapped.`
+        `Subsurface Darcy flows & saturated streamlines re-analysed: ${hydro.subsurfaceFlowAnalysis?.totalFlowConduits || 14} continuous conduits (Pore Velocity: ${hydro.subsurfaceFlowAnalysis?.meanPoreVelocityMPerDay || 1.15} m/day, Darcy Flux: ${hydro.subsurfaceFlowAnalysis?.meanDarcyFluxM3PerDay || 210} m³/day).`
       );
     }, 600);
   };
