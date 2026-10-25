@@ -34,7 +34,7 @@ export function exportSurveyToGeoJSON(
     });
   }
 
-  // Branching Cyan Network (Drainage & Lineament Pathways)
+  // Potential Subsurface Drainage Pathways, Geological Lineaments, Fractured Corridors & Palaeochannels
   for (const pw of pathways) {
     features.push({
       type: 'Feature',

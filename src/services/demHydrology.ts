@@ -323,15 +323,15 @@ export function generateHydrologyAndDrainage(
             conf = 'Moderate';
           }
 
-          const branchId = `stream-branch-${pathwayCounter++}`;
+          const branchId = `subsurface-pathway-${pathwayCounter++}`;
           pathways.push({
             id: branchId,
-            type: 'surface_drainage',
+            type: 'subsurface_flow',
             streamOrder: order,
             coordinates: branchCoords,
             confidence: conf,
             flowAccumulationScore: maxAccum,
-            description: `Dendritic drainage channel (Order ${order}) conveying convergent surface & shallow interflow.`,
+            description: `Potential Subsurface Drainage Pathway (Order ${order}) conveying preferential groundwater drainage & deep saprolite interflow.`,
             isSubPathway: false,
           });
 
@@ -341,7 +341,7 @@ export function generateHydrologyAndDrainage(
     }
   }
 
-  // B. Generate High-Density Lateral Sub-Pathways (Feather / Pinnate Herringbone Branches)
+  // B. Generate Subsurface Drainage Sub-Pathways (Saprolite Interflow Lateral Conduits)
   // This produces the characteristic high-density cyan branching shown in the reference image!
   mainStreamBranches.forEach(branch => {
     const coords = branch.coords;
@@ -362,7 +362,7 @@ export function generateHydrologyAndDrainage(
       // Upstream flow direction
       const upstreamAngle = Math.atan2(-dLat, -dLng);
 
-      // Symmetrically or alternately branch lateral feeder sub-pathways on both flanks (Left and Right)
+      // Symmetrically or alternately branch lateral subsurface drainage sub-pathways on both flanks (Left and Right)
       // Pinnate acute junction angle: ~42 degrees from upstream direction
       const angles = [upstreamAngle + 0.73, upstreamAngle - 0.73];
 
@@ -388,12 +388,12 @@ export function generateHydrologyAndDrainage(
 
         pathways.push({
           id: `sub-pathway-${branch.id}-${k}-${aIdx}`,
-          type: 'surface_drainage',
+          type: 'subsurface_flow',
           streamOrder: 3,
           coordinates: subCoords,
           confidence: 'Moderate',
           flowAccumulationScore: Math.round(branch.order === 1 ? 18 : 10),
-          description: `Lateral feeder sub-pathway conveying colluvial drainage and shallow saprolite interflow into ${branch.id}.`,
+          description: `Potential Subsurface Drainage Sub-Pathway (Order 3) conveying lateral colluvial & saprolite interflow into ${branch.id}.`,
           isSubPathway: true,
           parentBranchId: branch.id,
         });
@@ -411,12 +411,12 @@ export function generateHydrologyAndDrainage(
 
           pathways.push({
             id: `twig-${branch.id}-${k}-${aIdx}`,
-            type: 'surface_drainage',
+            type: 'subsurface_flow',
             streamOrder: 4,
             coordinates: twigCoords,
             confidence: 'Moderate',
             flowAccumulationScore: 6,
-            description: `Tertiary feeder rill (Order 4) draining local hill slope into sub-pathway.`,
+            description: `Potential Subsurface Drainage Sub-Pathway (Order 4 micro-conduit) conveying localized recharge interflow.`,
             isSubPathway: true,
             parentBranchId: branch.id,
           });
@@ -502,44 +502,68 @@ export function generateHydrologyAndDrainage(
     }
   }
 
-  // 7. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
+  // 7. Geological Lineaments, Fractured-Rock Corridors & Buried Palaeochannels
   const lineamentAngle1 = valleyAngleRad;
   const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.3);
-  const numLineaments = 6;
+  const numFeatures = 8;
 
-  for (let i = 0; i < numLineaments; i++) {
+  for (let i = 0; i < numFeatures; i++) {
     const angle = i % 2 === 0 ? lineamentAngle1 : lineamentAngle2;
-    const offsetFrac = (i - 2.5) * 0.26;
+    const offsetFrac = (i - 3.5) * 0.22;
     const offsetLat = centerLat + offsetFrac * latSpan;
     const offsetLng = centerLng + offsetFrac * lngSpan * 0.75;
 
     const lengthDeg = Math.max(latSpan, lngSpan) * 1.4;
     const numPoints = 9;
-    const lineamentCoords: [number, number][] = [];
+    const featureCoords: [number, number][] = [];
 
     for (let p = 0; p < numPoints; p++) {
       const t = (p / (numPoints - 1)) - 0.5;
       const lat = offsetLat + t * lengthDeg * Math.cos(angle);
       const lng = offsetLng + t * lengthDeg * Math.sin(angle);
       const sinWiggle = Math.sin(p * 1.8 + i) * (latSpan * 0.02);
-      lineamentCoords.push([lat + sinWiggle, lng + sinWiggle]);
+      featureCoords.push([lat + sinWiggle, lng + sinWiggle]);
+    }
+
+    let featureType: PathwayType = 'geological_lineament';
+    let featureDesc = '';
+    let featureVelocity = 0.85;
+    let featureFlux = 190;
+    let featureDepth = 7.2;
+
+    if (i === 2 || i === 6) {
+      featureType = 'palaeochannel';
+      featureVelocity = 1.65;
+      featureFlux = 340;
+      featureDepth = 5.2;
+      featureDesc = `Buried palaeochannel corridor with thick alluvial gravel fill, multi-layered aquifer storage, and high secondary transmissivity along ancestral drainage axis.`;
+    } else if (i === 4 || i === 5 || i === 7) {
+      featureType = 'fractured_corridor';
+      featureVelocity = 1.15;
+      featureFlux = 240;
+      featureDepth = 6.4;
+      featureDesc = `Fractured-rock corridor with high secondary hydraulic conductivity, dilated bedrock shear joints, and tectonic lineament intersection.`;
+    } else {
+      featureType = 'geological_lineament';
+      featureVelocity = 0.75;
+      featureFlux = 160;
+      featureDepth = 8.1;
+      featureDesc = `Regional geological lineament trace reflecting tectonic stress orientation (azimuth ${Math.round(angle * 180 / Math.PI)}°) and deep crystalline bedrock jointing.`;
     }
 
     pathways.push({
-      id: `lineament-fracture-${pathwayCounter++}`,
-      type: i === 2 ? 'palaeochannel' : 'inferred_fracture',
+      id: `${featureType}-${pathwayCounter++}`,
+      type: featureType,
       streamOrder: 2,
-      coordinates: lineamentCoords,
-      confidence: i < 3 ? 'High' : 'Moderate',
+      coordinates: featureCoords,
+      confidence: i < 4 ? 'High' : 'Moderate',
       flowAccumulationScore: 30 + i * 5,
-      flowVelocityMPerDay: i === 2 ? 1.45 : 0.85,
+      flowVelocityMPerDay: featureVelocity,
       hydraulicGradient: 0.012,
-      depthToWaterM: i === 2 ? 4.8 : 7.2,
-      darcyFluxM3PerDay: i === 2 ? 320 : 185,
+      depthToWaterM: featureDepth,
+      darcyFluxM3PerDay: featureFlux,
       flowDirectionDeg: Math.round(angle * 180 / Math.PI),
-      description: i === 2
-        ? 'Buried palaeochannel corridor with thick alluvial gravel fill, multi-layered aquifer storage, and high secondary transmissivity.'
-        : `Tectonic structural fracture / shear corridor oriented along azimuth ${Math.round(angle * 180 / Math.PI)}° with enhanced secondary fracture permeability.`,
+      description: featureDesc,
       isSubPathway: false,
     });
   }

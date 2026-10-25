@@ -8,11 +8,13 @@ export type PotentialClass =
 export type ConfidenceLevel = 'High' | 'Moderate' | 'Low';
 
 export type PathwayType =
-  | 'surface_drainage'
-  | 'inferred_fracture'
+  | 'subsurface_flow'
+  | 'geological_lineament'
+  | 'fractured_corridor'
   | 'palaeochannel'
+  | 'inferred_fracture'
   | 'lineament_intersection'
-  | 'subsurface_flow';
+  | 'surface_drainage';
 
 export interface BranchingPathway {
   id: string;

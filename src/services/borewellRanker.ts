@@ -150,10 +150,12 @@ export function rankTop3BorewellPoints(
         }
       }
 
-      const distDrainage = minDistanceToPathways(pt, hydrology.pathways, 'surface_drainage');
+      const distDrainage = minDistanceToPathways(pt, hydrology.pathways, 'subsurface_flow');
       const distLineament = Math.min(
-        minDistanceToPathways(pt, hydrology.pathways, 'inferred_fracture'),
-        minDistanceToPathways(pt, hydrology.pathways, 'palaeochannel')
+        minDistanceToPathways(pt, hydrology.pathways, 'geological_lineament'),
+        minDistanceToPathways(pt, hydrology.pathways, 'fractured_corridor'),
+        minDistanceToPathways(pt, hydrology.pathways, 'palaeochannel'),
+        minDistanceToPathways(pt, hydrology.pathways, 'inferred_fracture')
       );
       const distSubsurface = minDistanceToPathways(pt, hydrology.pathways, 'subsurface_flow');
 
