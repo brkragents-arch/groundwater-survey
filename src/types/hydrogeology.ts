@@ -52,7 +52,7 @@ export interface BranchingPathway {
   manningVelocityMPerSec?: number;
   catchmentAreaAcres?: number;
   channelGradient?: number;
-  drainageType?: 'master_valley_thalweg' | 'collector_tributary' | 'feeder_nullah' | 'ephemeral_gully';
+  drainageType?: 'master_valley_thalweg' | 'master_irrigation_canal' | 'collector_tributary' | 'feeder_nullah' | 'ephemeral_gully';
 }
 
 export interface BorewellCandidate {

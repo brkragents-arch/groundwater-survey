@@ -322,11 +322,13 @@ export const MapView: React.FC<MapViewProps> = ({
       if (isDrainage) {
         // Hydrographically accurate surface drainage styling
         if (pw.streamOrder === 1) {
-          // Master Valley Drainage Thalweg
+          // Master Valley Drainage Thalweg / Irrigation Canal
           weight = 4.4;
           color = '#0284c7'; // Deep electric blue
           cssClass = 'surface-drainage-thalweg';
-          title = 'Master Surface Drainage Channel (Order 1 - Valley Thalweg)';
+          title = pw.drainageType === 'master_irrigation_canal'
+            ? 'Master Surface Canal (Order 1 - Irrigation Corridor)'
+            : 'Master Surface Drainage Channel (Order 1 - Valley Thalweg)';
 
           // Add radiant sky-blue core highlight for the master thalweg
           const core = L.polyline(pw.coordinates, {
@@ -341,7 +343,8 @@ export const MapView: React.FC<MapViewProps> = ({
           weight = 3.0;
           color = '#06b6d4'; // Bright cyan-blue
           cssClass = 'surface-drainage-glow';
-          title = 'Surface Drainage Tributary (Order 2 - Collector Stream)';
+          const matchName = pw.description.match(/\(Order 2 - ([^)]+)\)/);
+          title = matchName ? `Surface Drainage Tributary (Order 2 - ${matchName[1]})` : 'Surface Drainage Tributary (Order 2 - Collector Stream)';
         } else if (pw.streamOrder === 3) {
           // Tertiary Feeder Nullah
           weight = 2.0;
