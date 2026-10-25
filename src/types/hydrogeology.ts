@@ -47,6 +47,12 @@ export interface BranchingPathway {
   fractureApertureMm?: number;
   junctionAngleDeg?: number;
   transmissivityM2PerDay?: number;
+  // Surface drainage hydrology metadata
+  surfaceDischargeM3PerSec?: number;
+  manningVelocityMPerSec?: number;
+  catchmentAreaAcres?: number;
+  channelGradient?: number;
+  drainageType?: 'master_valley_thalweg' | 'collector_tributary' | 'feeder_nullah' | 'ephemeral_gully';
 }
 
 export interface BorewellCandidate {

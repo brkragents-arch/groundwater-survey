@@ -179,6 +179,42 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             <span className="text-cyan-300 font-mono font-medium">NNW-SSE & ENE-WSW</span>
           </div>
         </div>
+
+        {/* Surface Drainage Watershed Network Card */}
+        <div className="mt-2 p-2 bg-slate-950/90 rounded-xl border border-sky-500/40 text-[11px] space-y-1 shadow-md">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-sky-300 flex items-center gap-1.5 text-xs">
+              <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+              Surface Drainage Network
+            </span>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-950 text-sky-300 border border-blue-800 font-bold">
+              {hydrologyResult.drainageAnalysis?.totalDrainageChannels || 20} Channels
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1 text-[10.5px] text-slate-300 pt-1 border-t border-slate-900">
+            <div>
+              <span className="text-slate-400">Master Thalweg:</span>{' '}
+              <span className="font-mono text-sky-300 font-bold">
+                {hydrologyResult.drainageAnalysis?.masterThalwegLengthM || 680} m
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400">Stream Orders:</span>{' '}
+              <span className="font-mono text-cyan-200 font-bold">4 Strahler Tiers</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Drainage Density:</span>{' '}
+              <span className="font-mono text-emerald-400 font-bold">
+                {hydrologyResult.drainageDensityKmPerSqKm} km/km²
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400">Flow Regime:</span>{' '}
+              <span className="font-mono text-amber-300 font-bold">Dendritic D8</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Candidate Cards List */}

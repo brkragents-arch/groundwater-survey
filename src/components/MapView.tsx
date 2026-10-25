@@ -301,7 +301,7 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!pathwaysLayerRef.current) return;
     pathwaysLayerRef.current.clearLayers();
 
-    pathways.forEach(pw => {
+        pathways.forEach(pw => {
       const isFracture = pw.type === 'inferred_fracture';
       const isPalaeo = pw.type === 'palaeochannel';
       const isDrainage = pw.type === 'surface_drainage';
@@ -312,14 +312,49 @@ export const MapView: React.FC<MapViewProps> = ({
 
       const isBranch = pw.isFractureBranch;
 
-      // Visual hierarchy styling
+      // Surface Drainage & Subsurface Fractures Visual Hierarchy
       let weight = 2.4;
       let color = '#00f3ff';
       let dashArray: string | undefined = undefined;
       let cssClass = 'cyan-network-glow';
       let title = `Surface Drainage Channel (Order ${pw.streamOrder})`;
 
-      if (isFracture) {
+      if (isDrainage) {
+        // Hydrographically accurate surface drainage styling
+        if (pw.streamOrder === 1) {
+          // Master Valley Drainage Thalweg
+          weight = 4.4;
+          color = '#0284c7'; // Deep electric blue
+          cssClass = 'surface-drainage-thalweg';
+          title = 'Master Surface Drainage Channel (Order 1 - Valley Thalweg)';
+
+          // Add radiant sky-blue core highlight for the master thalweg
+          const core = L.polyline(pw.coordinates, {
+            color: '#38bdf8',
+            weight: 2.0,
+            opacity: 1.0,
+            interactive: false,
+          });
+          core.addTo(pathwaysLayerRef.current!);
+        } else if (pw.streamOrder === 2) {
+          // Secondary Collector Tributary
+          weight = 3.0;
+          color = '#06b6d4'; // Bright cyan-blue
+          cssClass = 'surface-drainage-glow';
+          title = 'Surface Drainage Tributary (Order 2 - Collector Stream)';
+        } else if (pw.streamOrder === 3) {
+          // Tertiary Feeder Nullah
+          weight = 2.0;
+          color = '#0284c7';
+          cssClass = 'surface-drainage-glow';
+          title = 'Surface Drainage Gully (Order 3 - Feeder Nullah)';
+        } else {
+          // Order 4 Headwater Colluvial Swale Rill
+          weight = 1.3;
+          color = '#7dd3fc';
+          title = 'Headwater Surface Rill (Order 4 - Colluvial Swale)';
+        }
+      } else if (isFracture) {
         if (isBranch) {
           if (pw.streamOrder === 4) {
             // Tertiary micro-splay
@@ -351,7 +386,6 @@ export const MapView: React.FC<MapViewProps> = ({
         dashArray = '8, 4';
         title = 'Buried Palaeochannel Aquifer Corridor';
 
-        // Add soft alluvial buffer ribbon
         const ribbon = L.polyline(pw.coordinates, {
           color: '#0284c7',
           weight: 8,
@@ -374,26 +408,51 @@ export const MapView: React.FC<MapViewProps> = ({
         className: cssClass,
       });
 
-      polyline.bindPopup(`
-        <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[250px]">
-          <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
-            <span class="inline-block w-2.5 h-2.5 rounded-full ${isFracture ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
-            <span>${title}</span>
+      // Tailored Popup for Surface Drainage vs Subsurface Fractures
+      if (isDrainage) {
+        polyline.bindPopup(`
+          <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-sky-500/60 rounded-xl shadow-2xl min-w-[260px]">
+            <div class="flex items-center gap-1.5 font-bold text-sky-400 mb-1.5 border-b border-slate-800 pb-1">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse"></span>
+              <span>${title}</span>
+            </div>
+            <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
+            <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
+              <div>Stream Order: <span class="text-sky-300 font-mono font-bold">Strahler Order ${pw.streamOrder}</span></div>
+              <div>Flow Accumulation: <span class="text-cyan-300 font-mono font-bold">${pw.flowAccumulationScore} cells</span></div>
+              ${pw.catchmentAreaAcres !== undefined ? `<div>Catchment Drained: <span class="text-emerald-300 font-mono font-bold">${pw.catchmentAreaAcres} Acres</span></div>` : ''}
+              ${pw.surfaceDischargeM3PerSec !== undefined ? `<div>Peak Runoff (Q): <span class="text-blue-300 font-mono font-bold">${pw.surfaceDischargeM3PerSec} m³/s</span></div>` : ''}
+              ${pw.manningVelocityMPerSec !== undefined ? `<div>Manning Velocity: <span class="text-cyan-200 font-mono font-bold">${pw.manningVelocityMPerSec} m/s</span></div>` : ''}
+              ${pw.channelGradient !== undefined ? `<div>Bed Gradient: <span class="text-amber-300 font-mono font-bold">${pw.channelGradient} m/m</span></div>` : ''}
+            </div>
+            <div class="mt-2 pt-1 border-t border-slate-900 text-[10px] text-sky-300/80 flex items-center gap-1">
+              <span>🌊</span>
+              <span>D8 Watershed Flow Conduit conveying storm runoff & valley infiltration.</span>
+            </div>
           </div>
-          <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
-          <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
-            <div>Confidence: <span class="text-slate-200 font-semibold">${pw.confidence}</span></div>
-            <div>Flow Score: <span class="text-cyan-300 font-mono font-bold">${pw.flowAccumulationScore}</span></div>
-            ${isBranch ? `<div>Parent Conduit: <span class="text-cyan-200 font-mono font-bold">${pw.parentBranchId}</span></div>` : ''}
-            ${pw.junctionAngleDeg !== undefined ? `<div>Junction Angle: <span class="text-amber-300 font-mono font-bold">${pw.junctionAngleDeg}°</span></div>` : ''}
-            ${pw.fractureApertureMm !== undefined ? `<div>Dilated Aperture: <span class="text-emerald-300 font-mono font-bold">${pw.fractureApertureMm} mm</span></div>` : ''}
-            ${pw.flowVelocityMPerDay !== undefined ? `<div>Darcy Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>` : ''}
-            ${pw.hydraulicGradient !== undefined ? `<div>Hydraulic Grad: <span class="text-cyan-200 font-mono">${pw.hydraulicGradient} m/m</span></div>` : ''}
-            ${pw.depthToWaterM !== undefined ? `<div>Water Table Depth: <span class="text-amber-300 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>` : ''}
-            ${pw.darcyFluxM3PerDay !== undefined ? `<div>Darcy Flux: <span class="text-blue-300 font-mono font-bold">${pw.darcyFluxM3PerDay} m³/day</span></div>` : ''}
+        `);
+      } else {
+        polyline.bindPopup(`
+          <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[250px]">
+            <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
+              <span class="inline-block w-2.5 h-2.5 rounded-full ${isFracture ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
+              <span>${title}</span>
+            </div>
+            <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>
+            <div class="grid grid-cols-2 gap-1.5 text-[10.5px] pt-1.5 border-t border-slate-800/80">
+              <div>Confidence: <span class="text-slate-200 font-semibold">${pw.confidence}</span></div>
+              <div>Flow Score: <span class="text-cyan-300 font-mono font-bold">${pw.flowAccumulationScore}</span></div>
+              ${isBranch ? `<div>Parent Conduit: <span class="text-cyan-200 font-mono font-bold">${pw.parentBranchId}</span></div>` : ''}
+              ${pw.junctionAngleDeg !== undefined ? `<div>Junction Angle: <span class="text-amber-300 font-mono font-bold">${pw.junctionAngleDeg}°</span></div>` : ''}
+              ${pw.fractureApertureMm !== undefined ? `<div>Dilated Aperture: <span class="text-emerald-300 font-mono font-bold">${pw.fractureApertureMm} mm</span></div>` : ''}
+              ${pw.flowVelocityMPerDay !== undefined ? `<div>Darcy Velocity: <span class="text-emerald-300 font-mono font-bold">${pw.flowVelocityMPerDay} m/day</span></div>` : ''}
+              ${pw.hydraulicGradient !== undefined ? `<div>Hydraulic Grad: <span class="text-cyan-200 font-mono">${pw.hydraulicGradient} m/m</span></div>` : ''}
+              ${pw.depthToWaterM !== undefined ? `<div>Water Table Depth: <span class="text-amber-300 font-mono font-bold">~${pw.depthToWaterM} m bgl</span></div>` : ''}
+              ${pw.darcyFluxM3PerDay !== undefined ? `<div>Darcy Flux: <span class="text-blue-300 font-mono font-bold">${pw.darcyFluxM3PerDay} m³/day</span></div>` : ''}
+            </div>
           </div>
-        </div>
-      `);
+        `);
+      }
 
       polyline.addTo(pathwaysLayerRef.current!);
     });
@@ -671,7 +730,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   <span className="w-3 border-b-2 border-dashed border-cyan-400 shadow-[0_0_6px_#00f3ff]"></span>
                   <span className="text-cyan-300 font-medium">Inferred Subsurface Fractures & Branches</span>
                   <span className="text-[9px] font-mono px-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">
-                    ${masterFractures.length}M / ${fractureBranches.length}B
+                    {masterFractures.length}M / {fractureBranches.length}B
                   </span>
                 </span>
                 <input
@@ -688,7 +747,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   <span className="w-2.5 h-2.5 rotate-45 border border-cyan-400 bg-cyan-400/30"></span>
                   <span className="text-cyan-200 font-medium">Fracture Intersection Hubs</span>
                   <span className="text-[9px] font-mono px-1 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                    ${fractureIntersectionNodes?.length || 0} Nodes
+                    {(fractureIntersectionNodes || []).length} Nodes
                   </span>
                 </span>
                 <input
@@ -703,9 +762,9 @@ export const MapView: React.FC<MapViewProps> = ({
               <label className="flex items-center justify-between gap-3 px-1.5 py-1 rounded hover:bg-slate-800/60 cursor-pointer">
                 <span className="flex items-center gap-2">
                   <span className="w-3 h-0.5 bg-cyan-400 shadow-[0_0_4px_#00f3ff]"></span>
-                  <span>Surface Drainage Channels</span>
+                  <span className="text-sky-300 font-medium">Surface Drainage Channels (D8 Catchment)</span>
                   <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-300">
-                    ${drainagePathways.length}
+                    {drainagePathways.length} Streams
                   </span>
                 </span>
                 <input
@@ -885,13 +944,36 @@ export const MapView: React.FC<MapViewProps> = ({
               </div>
             </div>
 
-            {/* Solid Cyan Line */}
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-0.5 bg-cyan-400 shadow-[0_0_6px_#00f3ff] rounded-full shrink-0"></div>
-              <div>
-                <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
-                <span className="text-slate-300">Surface Drainage Channels</span>
-                <p className="text-[10px] text-slate-400 leading-tight">Terrain convergence channels, nullahs & runoff gullies (D8 routing)</p>
+            {/* Surface Drainage Network Hierarchy */}
+            <div className="pt-1 border-t border-slate-800/80">
+              <span className="text-sky-400 font-bold text-[10.5px] block mb-1">Surface Drainage Channels (D8 Watershed Routing):</span>
+              <div className="space-y-1 pl-0.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-1.5 bg-sky-500 shadow-[0_0_8px_#0284c7] rounded-full shrink-0 flex items-center justify-center">
+                    <div className="w-5 h-0.5 bg-sky-200"></div>
+                  </div>
+                  <div>
+                    <span className="text-sky-300 font-semibold">Thick Deep-Azure / Sky:</span>{' '}
+                    <span className="text-slate-200">Order 1 Master Valley Thalweg</span>
+                    <p className="text-[10px] text-slate-400 leading-tight">Perennial main nullah conveying regional storm runoff</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-1 bg-cyan-400 shadow-[0_0_5px_#06b6d4] rounded-full shrink-0"></div>
+                  <div>
+                    <span className="text-cyan-300 font-semibold">Solid Cyan:</span>{' '}
+                    <span className="text-slate-200">Order 2 Tributary Streams</span>
+                    <p className="text-[10px] text-slate-400 leading-tight">Collector creeks draining lateral valley sub-catchments</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-0.5 bg-sky-300 shrink-0"></div>
+                  <div>
+                    <span className="text-sky-200 font-semibold">Thin Sky-Blue:</span>{' '}
+                    <span className="text-slate-200">Order 3 & 4 Feeder Gullies / Swale Rills</span>
+                    <p className="text-[10px] text-slate-400 leading-tight">Colluvial rills capturing initial hillslope storm sheetwash</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -934,7 +1016,7 @@ export const MapView: React.FC<MapViewProps> = ({
       <div className="absolute bottom-6 left-4 z-10 bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl px-3 py-2 shadow-2xl flex items-center gap-3 text-xs">
         <div className="flex items-center gap-2 text-cyan-400 font-mono text-[11px]">
           <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
-          <span>AQUASYNC REFERENCE OVERLAY ACTIVE</span>
+          <span>WATERSHED DRAINAGE & FRACTURE NETWORKS ACTIVE</span>
         </div>
         <div className="h-3 w-px bg-slate-700"></div>
         {cursorCoords && (

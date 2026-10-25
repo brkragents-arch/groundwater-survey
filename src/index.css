@@ -28,6 +28,14 @@
   stroke-dasharray: 4, 4;
 }
 
+.surface-drainage-glow {
+  filter: drop-shadow(0 0 4px #0284c7) drop-shadow(0 0 2px #38bdf8);
+}
+
+.surface-drainage-thalweg {
+  filter: drop-shadow(0 0 6px #0ea5e9) drop-shadow(0 0 2px #38bdf8);
+}
+
 .yellow-boundary-glow {
   filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.7));
 }
