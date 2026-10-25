@@ -24,12 +24,11 @@
 }
 
 .cyan-subsurface-glow {
-  filter: drop-shadow(0 0 3px #06b6d4);
-  stroke-dasharray: 4, 4;
+  filter: drop-shadow(0 0 3px #00f3ff);
 }
 
 .yellow-boundary-glow {
-  filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.7));
+  filter: drop-shadow(0 0 8px rgba(255, 230, 0, 0.85));
 }
 
 /* Custom scrollbars */

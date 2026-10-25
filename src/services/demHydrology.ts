@@ -266,13 +266,127 @@ export function generateHydrologyAndDrainage(
   const pathways: BranchingPathway[] = [];
   const visitedBranches = new Set<string>();
 
-  const majorStreamThreshold = Math.max(16, gridSize * 0.7);
-  const mediumStreamThreshold = Math.max(7, gridSize * 0.3);
-  const minorStreamThreshold = Math.max(3, gridSize * 0.15);
+  const majorStreamThreshold = Math.max(14, gridSize * 0.6);
+  const mediumStreamThreshold = Math.max(6, gridSize * 0.25);
+  const minorStreamThreshold = Math.max(3, gridSize * 0.12);
 
   let pathwayCounter = 1;
 
-  // Surface Stream branches
+  // Helper: Generates realistic dendritic sub-pathways and herringbone feeder branches
+  // matching natural drainage and the user's reference image!
+  function createDendriticFeeders(
+    trunkCoords: [number, number][],
+    parentOrder: number,
+    baseType: 'surface_drainage' | 'subsurface_flow' | 'sub_pathway',
+    feederLengthScale: number = 0.0016
+  ): BranchingPathway[] {
+    const feeders: BranchingPathway[] = [];
+    if (trunkCoords.length < 3) return feeders;
+
+    // Confluence angle: 36° to 46° upstream (Horton's tributary law)
+    const junctionAngleRad = (40 * Math.PI) / 180;
+
+    for (let k = 1; k < trunkCoords.length - 1; k += 2) {
+      const pPrev = trunkCoords[k - 1];
+      const pCurr = trunkCoords[k];
+      const pNext = trunkCoords[k + 1];
+
+      // Downstream vector pCurr -> pNext
+      const dLat = pNext[0] - pCurr[0];
+      const dLng = pNext[1] - pCurr[1];
+      const mag = Math.hypot(dLat, dLng);
+      if (mag < 1e-6) continue;
+
+      // Upstream unit vector
+      const uLat = -dLat / mag;
+      const uLng = -dLng / mag;
+
+      // Normal perpendicular unit vector
+      const nLat = -uLng;
+      const nLng = uLat;
+
+      // Left & Right feeder branch directions
+      const leftDir = [
+        uLat * Math.cos(junctionAngleRad) + nLat * Math.sin(junctionAngleRad),
+        uLng * Math.cos(junctionAngleRad) + nLng * Math.sin(junctionAngleRad),
+      ];
+      const rightDir = [
+        uLat * Math.cos(junctionAngleRad) - nLat * Math.sin(junctionAngleRad),
+        uLng * Math.cos(junctionAngleRad) - nLng * Math.sin(junctionAngleRad),
+      ];
+
+      // Generate feeder branches on both left and right sides
+      const branchDirs = [leftDir, rightDir];
+      branchDirs.forEach((dir, sideIdx) => {
+        // Vary feeder length: 3 to 5 nodes
+        const numNodes = 3 + ((k + sideIdx) % 3);
+        const branchCoords: [number, number][] = [[pCurr[0], pCurr[1]]];
+
+        let curPtLat = pCurr[0];
+        let curPtLng = pCurr[1];
+        const stepDist = (feederLengthScale / numNodes) * (0.8 + ((k * 3 + sideIdx * 5) % 5) * 0.1);
+
+        for (let step = 1; step <= numNodes; step++) {
+          // Slight natural sinuosity along the feeder branch
+          const sinWiggle = Math.sin(step * 1.5 + k) * (feederLengthScale * 0.12);
+          curPtLat += dir[0] * stepDist + sinWiggle;
+          curPtLng += dir[1] * stepDist + sinWiggle;
+          branchCoords.push([curPtLat, curPtLng]);
+        }
+
+        const childOrder = Math.min(4, parentOrder + 1);
+        const subFlowScore = Math.max(12, Math.round(35 - childOrder * 6 + (k % 4)));
+
+        feeders.push({
+          id: `feeder-subpath-${pathwayCounter++}`,
+          type: baseType === 'subsurface_flow' ? 'subsurface_flow' : 'sub_pathway',
+          streamOrder: childOrder,
+          coordinates: branchCoords,
+          confidence: 'High',
+          flowAccumulationScore: subFlowScore,
+          flowVelocityMPerDay: Math.round((0.45 + (k % 3) * 0.15) * 100) / 100,
+          hydraulicGradient: 0.011,
+          depthToWaterM: Math.round((5.0 + (k % 4) * 0.8) * 10) / 10,
+          darcyFluxM3PerDay: Math.round(60 + (k % 5) * 15),
+          flowDirectionDeg: Math.round(((Math.atan2(-dir[0], dir[1]) * 180) / Math.PI + 360) % 360),
+          description: `Tributary sub-pathway (Order ${childOrder}) feeding convergent runoff & subsurface interflow into main corridor.`,
+        });
+
+        // Tertiary micro-feeder twigs (Order 4) branching off secondary feeders!
+        if (childOrder === 2 && branchCoords.length >= 3) {
+          const midPt = branchCoords[Math.floor(branchCoords.length / 2)];
+          const twigDir = [
+            dir[0] * Math.cos(0.6) + dir[1] * Math.sin(0.6),
+            -dir[0] * Math.sin(0.6) + dir[1] * Math.cos(0.6),
+          ];
+          const twigCoords: [number, number][] = [
+            [midPt[0], midPt[1]],
+            [midPt[0] + twigDir[0] * (feederLengthScale * 0.45), midPt[1] + twigDir[1] * (feederLengthScale * 0.45)],
+            [midPt[0] + twigDir[0] * (feederLengthScale * 0.8), midPt[1] + twigDir[1] * (feederLengthScale * 0.8)],
+          ];
+
+          feeders.push({
+            id: `micro-feeder-${pathwayCounter++}`,
+            type: 'sub_pathway',
+            streamOrder: 4,
+            coordinates: twigCoords,
+            confidence: 'Moderate',
+            flowAccumulationScore: 14,
+            flowVelocityMPerDay: 0.35,
+            hydraulicGradient: 0.015,
+            depthToWaterM: 6.8,
+            darcyFluxM3PerDay: 35,
+            flowDirectionDeg: Math.round(((Math.atan2(-twigDir[0], twigDir[1]) * 180) / Math.PI + 360) % 360),
+            description: 'Micro-capillary feeder sub-pathway (Order 4) draining local recharge depression.',
+          });
+        }
+      });
+    }
+
+    return feeders;
+  }
+
+  // 5A. Surface Stream Trunks & Dendritic Feeder Networks
   for (let r = 1; r < gridSize - 1; r++) {
     for (let c = 1; c < gridSize - 1; c++) {
       const accum = elevationGrid[r][c].flowAccumulation;
@@ -304,39 +418,49 @@ export function generateHydrologyAndDrainage(
             return elevationGrid[gr][gc].flowAccumulation;
           }));
 
-          let order = 4;
+          let order = 3;
           let conf: ConfidenceLevel = 'Moderate';
-          if (maxAccum >= majorStreamThreshold * 1.5) {
+          if (maxAccum >= majorStreamThreshold * 1.4) {
             order = 1;
             conf = 'High';
-          } else if (maxAccum >= majorStreamThreshold) {
+          } else if (maxAccum >= majorStreamThreshold * 0.8) {
             order = 2;
             conf = 'High';
-          } else if (maxAccum >= mediumStreamThreshold) {
-            order = 3;
-            conf = 'Moderate';
           }
 
+          // Main surface stream trunk
           pathways.push({
-            id: `stream-branch-${pathwayCounter++}`,
+            id: `stream-trunk-${pathwayCounter++}`,
             type: 'surface_drainage',
             streamOrder: order,
             coordinates: branchCoords,
             confidence: conf,
             flowAccumulationScore: maxAccum,
-            description: `Dendritic drainage channel (Order ${order}) conveying convergent surface & shallow interflow.`,
+            flowVelocityMPerDay: order === 1 ? 1.65 : 1.15,
+            hydraulicGradient: 0.013,
+            depthToWaterM: order === 1 ? 3.8 : 5.4,
+            darcyFluxM3PerDay: order === 1 ? 280 : 160,
+            description: `Primary dendritic drainage trunk (Order ${order}) conveying convergent surface & shallow interflow.`,
           });
+
+          // Generate branching dendritic feeder sub-pathways feeding into this trunk!
+          const feederBranches = createDendriticFeeders(
+            branchCoords,
+            order,
+            'surface_drainage',
+            Math.max(latSpan, lngSpan) * 0.16
+          );
+          pathways.push(...feederBranches);
         }
       }
     }
   }
 
-  // 6. Subsurface Groundwater Flow Pathways (Traced along Hydraulic Potential Field -grad H)
-  const numSubsurfaceConduits = 6;
+  // 5B. Subsurface Groundwater Flow Conduits (Traced along Hydraulic Head Gradient)
+  const numSubsurfaceConduits = 7;
   for (let s = 0; s < numSubsurfaceConduits; s++) {
-    // Staggered recharge origin points across the upper contours
-    const initR = Math.min(gridSize - 2, Math.max(2, Math.round(gridSize * 0.75 - (s * 3.2))));
-    const initC = Math.min(gridSize - 2, Math.max(2, Math.round(2 + s * 3.8)));
+    const initR = Math.min(gridSize - 2, Math.max(2, Math.round(gridSize * 0.8 - (s * 2.8))));
+    const initC = Math.min(gridSize - 2, Math.max(2, Math.round(2 + s * 3.4)));
 
     const conduitCoords: [number, number][] = [];
     let curR = initR;
@@ -348,7 +472,7 @@ export function generateHydrologyAndDrainage(
     let avgDepth = 0;
     let avgFlux = 0;
 
-    while (curR >= 1 && curR < gridSize - 1 && curC >= 1 && curC < gridSize - 1 && steps < 18) {
+    while (curR >= 1 && curR < gridSize - 1 && curC >= 1 && curC < gridSize - 1 && steps < 20) {
       const pt = elevationGrid[curR][curC];
       conduitCoords.push([pt.lat, pt.lng]);
       visitedSub.add(`${curR}_${curC}`);
@@ -361,7 +485,6 @@ export function generateHydrologyAndDrainage(
       avgFlux += pt.subsurfaceFluxM2PerDay;
       steps++;
 
-      // Follow downward hydraulic head to neighbor with lowest head
       let lowestHead = pt.hydraulicHeadM;
       let nextR = -1;
       let nextC = -1;
@@ -390,64 +513,84 @@ export function generateHydrologyAndDrainage(
       avgGrad = Math.round((avgGrad / steps) * 1000) / 1000;
       avgDepth = Math.round((avgDepth / steps) * 10) / 10;
       avgFlux = Math.round((avgFlux / steps) * 10) / 10;
-      const velocityMPerDay = Math.round((avgFlux / 15) * 100) / 100; // Darcy effective pore velocity
+      const velocityMPerDay = Math.round((avgFlux / 14) * 100) / 100;
 
+      // Subsurface trunk conduit
       pathways.push({
         id: `subsurface-conduit-${pathwayCounter++}`,
         type: 'subsurface_flow',
-        streamOrder: s < 2 ? 1 : 2,
+        streamOrder: s < 3 ? 1 : 2,
         coordinates: conduitCoords,
         confidence: 'High',
-        flowAccumulationScore: 35 + s * 8,
-        flowVelocityMPerDay: Math.max(0.25, velocityMPerDay),
-        hydraulicGradient: Math.max(0.005, avgGrad),
+        flowAccumulationScore: 40 + s * 7,
+        flowVelocityMPerDay: Math.max(0.35, velocityMPerDay),
+        hydraulicGradient: Math.max(0.006, avgGrad),
         depthToWaterM: avgDepth,
-        darcyFluxM3PerDay: Math.max(45, Math.round(avgFlux * 12)),
+        darcyFluxM3PerDay: Math.max(55, Math.round(avgFlux * 14)),
         flowDirectionDeg: Math.round(elevationGrid[initR][initC].subsurfaceFlowDirDeg),
-        description: `Subsurface groundwater flow conduit traced along hydraulic head gradient. Darcy pore velocity: ${Math.max(0.25, velocityMPerDay)} m/day; Depth to water table: ${avgDepth} m bgl.`,
+        description: `Subsurface groundwater flow pathway traced along downward hydraulic head gradient. Darcy velocity: ${Math.max(0.35, velocityMPerDay)} m/day; Water table depth: ${avgDepth} m bgl.`,
       });
+
+      // Lateral subsurface seepage & recharge sub-pathways feeding into this conduit
+      const subFeeders = createDendriticFeeders(
+        conduitCoords,
+        s < 3 ? 1 : 2,
+        'subsurface_flow',
+        Math.max(latSpan, lngSpan) * 0.14
+      );
+      pathways.push(...subFeeders);
     }
   }
 
-  // 7. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
+  // 5C. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
   const lineamentAngle1 = valleyAngleRad;
-  const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.3);
-  const numLineaments = 5;
+  const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.25);
+  const numLineaments = 6;
 
   for (let i = 0; i < numLineaments; i++) {
     const angle = i % 2 === 0 ? lineamentAngle1 : lineamentAngle2;
-    const offsetFrac = (i - 2) * 0.28;
+    const offsetFrac = (i - 2.5) * 0.26;
     const offsetLat = centerLat + offsetFrac * latSpan;
-    const offsetLng = centerLng + offsetFrac * lngSpan * 0.7;
+    const offsetLng = centerLng + offsetFrac * lngSpan * 0.75;
 
-    const lengthDeg = Math.max(latSpan, lngSpan) * 1.3;
-    const numPoints = 8;
+    const lengthDeg = Math.max(latSpan, lngSpan) * 1.35;
+    const numPoints = 9;
     const lineamentCoords: [number, number][] = [];
 
     for (let p = 0; p < numPoints; p++) {
       const t = (p / (numPoints - 1)) - 0.5;
       const lat = offsetLat + t * lengthDeg * Math.cos(angle);
       const lng = offsetLng + t * lengthDeg * Math.sin(angle);
-      const sinWiggle = Math.sin(p * 1.8 + i) * (latSpan * 0.02);
+      const sinWiggle = Math.sin(p * 1.8 + i) * (latSpan * 0.022);
       lineamentCoords.push([lat + sinWiggle, lng + sinWiggle]);
     }
 
+    const isPalaeo = i === 2;
     pathways.push({
-      id: `lineament-fracture-${pathwayCounter++}`,
-      type: i === 2 ? 'palaeochannel' : 'inferred_fracture',
+      id: `lineament-corridor-${pathwayCounter++}`,
+      type: isPalaeo ? 'palaeochannel' : 'inferred_fracture',
       streamOrder: 2,
       coordinates: lineamentCoords,
-      confidence: i < 3 ? 'High' : 'Moderate',
-      flowAccumulationScore: 28 + i * 5,
-      flowVelocityMPerDay: i === 2 ? 1.45 : 0.85,
+      confidence: i < 4 ? 'High' : 'Moderate',
+      flowAccumulationScore: 32 + i * 5,
+      flowVelocityMPerDay: isPalaeo ? 1.55 : 0.95,
       hydraulicGradient: 0.012,
-      depthToWaterM: i === 2 ? 4.8 : 7.2,
-      darcyFluxM3PerDay: i === 2 ? 320 : 185,
-      flowDirectionDeg: Math.round(angle * 180 / Math.PI),
-      description: i === 2
-        ? 'Buried palaeochannel corridor with thick alluvial gravel fill, multi-layered aquifer storage, and high secondary transmissivity.'
-        : `Tectonic structural fracture / shear corridor oriented along azimuth ${Math.round(angle * 180 / Math.PI)}° with enhanced secondary fracture permeability.`,
+      depthToWaterM: isPalaeo ? 4.5 : 6.8,
+      darcyFluxM3PerDay: isPalaeo ? 340 : 195,
+      flowDirectionDeg: Math.round(((angle * 180) / Math.PI + 360) % 360),
+      description: isPalaeo
+        ? 'Buried palaeochannel aquifer corridor with deep alluvial gravel fill, multi-layered storage, and high secondary transmissivity.'
+        : `Tectonic structural fracture / shear corridor (Azimuth ${Math.round(((angle * 180) / Math.PI + 360) % 360)}°) with enhanced fracture permeability.`,
     });
+
+    // Conjugate micro-fractures and splay joints feeding into fracture corridor
+    const splayFeeders = createDendriticFeeders(
+      lineamentCoords,
+      2,
+      isPalaeo ? 'subsurface_flow' : 'sub_pathway',
+      Math.max(latSpan, lngSpan) * 0.12
+    );
+    pathways.push(...splayFeeders);
   }
 
   const meanSlopeDeg = Math.round((totalSlope / ((gridSize - 2) * (gridSize - 2))) * 10) / 10;

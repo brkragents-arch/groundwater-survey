@@ -53,8 +53,16 @@ function minDistanceToPathways(
 ): number {
   let minDist = Infinity;
   for (const pw of pathways) {
-    if (filterType && pw.type !== filterType && !(filterType === 'inferred_fracture' && pw.type === 'palaeochannel')) {
-      continue;
+    if (filterType) {
+      if (filterType === 'surface_drainage' && pw.type !== 'surface_drainage' && pw.type !== 'sub_pathway') {
+        continue;
+      } else if (filterType === 'inferred_fracture' && pw.type !== 'inferred_fracture' && pw.type !== 'palaeochannel') {
+        continue;
+      } else if (filterType === 'subsurface_flow' && pw.type !== 'subsurface_flow' && pw.type !== 'recharge_zone') {
+        continue;
+      } else if (pw.type !== filterType) {
+        continue;
+      }
     }
     for (const pt of pw.coordinates) {
       const d = haversineDistanceM(point, pt);

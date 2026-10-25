@@ -287,40 +287,42 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!showCyanNetwork) return;
 
     pathways.forEach(pw => {
-      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow';
-      const isSubsurfaceFlow = pw.type === 'subsurface_flow';
+      const isSubsurface = pw.type === 'inferred_fracture' || pw.type === 'palaeochannel' || pw.type === 'subsurface_flow' || pw.type === 'sub_pathway' || pw.type === 'recharge_zone';
 
-      // Stream order thickness hierarchy:
-      // Order 1 (major trunk): 3.6px
-      // Order 2: 2.6px
-      // Order 3: 1.8px
-      // Order 4: 1.3px
+      // Stream order thickness hierarchy matching reference image:
+      // Order 1 (major trunk): 3.8px
+      // Order 2 (secondary branch): 2.6px
+      // Order 3 (tertiary sub-pathway): 1.8px
+      // Order 4 (micro-feeder twig): 1.3px
       let weight = 2.4;
-      if (pw.streamOrder === 1) weight = 3.6;
+      if (pw.streamOrder === 1) weight = 3.8;
       else if (pw.streamOrder === 2) weight = 2.6;
       else if (pw.streamOrder === 3) weight = 1.8;
       else weight = 1.3;
 
       const polyline = L.polyline(pw.coordinates, {
-        color: isSubsurfaceFlow ? '#00f3ff' : '#00f3ff', // Radiant cyan matching reference image
-        weight: isSubsurfaceFlow ? weight + 0.5 : weight,
-        opacity: isSubsurface ? 0.90 : 0.95,
-        dashArray: isSubsurfaceFlow ? '8, 4' : isSubsurface ? '6, 4' : undefined,
-        className: isSubsurfaceFlow ? 'cyan-subsurface-glow pulse-subsurface' : isSubsurface ? 'cyan-subsurface-glow' : 'cyan-network-glow',
+        color: '#00f3ff', // Radiant solid cyan matching reference image
+        weight,
+        opacity: 0.96,
+        className: 'cyan-network-glow',
       });
 
-      const title = isSubsurfaceFlow
-        ? 'Subsurface Groundwater Flow Conduit (Darcy Flow)'
+      const title = pw.type === 'subsurface_flow'
+        ? 'Subsurface Groundwater Flow Pathway (Darcy Flow)'
+        : pw.type === 'sub_pathway'
+        ? `Tributary Sub-Pathway Branch (Order ${pw.streamOrder})`
+        : pw.type === 'recharge_zone'
+        ? 'Recharge Zone Infiltration Swale'
         : pw.type === 'palaeochannel'
         ? 'Buried Palaeochannel Aquifer Corridor'
         : pw.type === 'inferred_fracture'
         ? 'Tectonic Structural Fracture Corridor'
-        : `Surface Drainage Channel (Order ${pw.streamOrder})`;
+        : `Primary Drainage Pathway (Order ${pw.streamOrder})`;
 
       polyline.bindPopup(`
         <div class="p-3 text-xs font-sans text-slate-100 bg-slate-950 border border-cyan-500/40 rounded-xl shadow-2xl min-w-[240px]">
           <div class="flex items-center gap-1.5 font-bold text-cyan-400 mb-1.5 border-b border-slate-800 pb-1">
-            <span class="inline-block w-2.5 h-2.5 rounded-full ${isSubsurface ? 'bg-cyan-400 animate-pulse' : 'bg-cyan-300'}"></span>
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
             <span>${title}</span>
           </div>
           <div class="text-slate-300 text-[11px] mb-2 leading-relaxed">${pw.description}</div>

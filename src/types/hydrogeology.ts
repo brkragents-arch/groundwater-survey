@@ -12,7 +12,9 @@ export type PathwayType =
   | 'inferred_fracture'
   | 'palaeochannel'
   | 'lineament_intersection'
-  | 'subsurface_flow';
+  | 'subsurface_flow'
+  | 'sub_pathway'
+  | 'recharge_zone';
 
 export interface BranchingPathway {
   id: string;
