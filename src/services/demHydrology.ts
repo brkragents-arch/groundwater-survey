@@ -1,4 +1,5 @@
 import { BranchingPathway, ConfidenceLevel } from '../types/hydrogeology';
+import { buildSubsurfaceDendriticNetwork, computeHeadContours, HeadContour } from './subsurfaceFlowNetwork';
 
 export interface ElevationGridPoint {
   lat: number;
@@ -28,6 +29,7 @@ export interface HydrologyAnalysisResult {
   regionalFlowDirectionDeg: number;
   dominantFlowRegime: string;
   subsurfacePathwaysCount: number;
+  headContours: HeadContour[];
 }
 
 /**
@@ -40,7 +42,7 @@ export function generateHydrologyAndDrainage(
   centerLat: number,
   centerLng: number,
   boundaryCoords: [number, number][],
-  gridSize: number = 28
+  gridSize: number = 36
 ): HydrologyAnalysisResult {
   // Determine bounding box with buffer
   let minLat = centerLat;
@@ -55,11 +57,12 @@ export function generateHydrologyAndDrainage(
     maxLng = Math.max(...boundaryCoords.map(c => c[1]));
   }
 
-  // 45% buffer around survey boundary for regional watershed & aquifer catchment context
+  // Wide buffer (110%) around the survey boundary so the subsurface flow network
+  // covers the surrounding catchment, as in the reference map
   const latSpan = Math.max(maxLat - minLat, 0.008);
   const lngSpan = Math.max(maxLng - minLng, 0.008);
-  const bufferLat = latSpan * 0.45;
-  const bufferLng = lngSpan * 0.45;
+  const bufferLat = latSpan * 1.1;
+  const bufferLng = lngSpan * 1.1;
 
   const startLat = minLat - bufferLat;
   const endLat = maxLat + bufferLat;
@@ -542,74 +545,127 @@ export function generateHydrologyAndDrainage(
     }
   }
 
-  // 5C. Structural Fracture Lineaments (Tectonic Conjugate Shear Trends)
+  // 5C. Structural Fracture Lineaments, Fault Corridors & Buried Palaeochannels (Dashed Cyan)
   const lineamentAngle1 = valleyAngleRad;
   const lineamentAngle2 = valleyAngleRad + (Math.PI / 2.25);
-  const numLineaments = 6;
+  const numLineaments = 7;
 
   for (let i = 0; i < numLineaments; i++) {
     const angle = i % 2 === 0 ? lineamentAngle1 : lineamentAngle2;
-    const offsetFrac = (i - 2.5) * 0.26;
-    const offsetLat = centerLat + offsetFrac * latSpan;
-    const offsetLng = centerLng + offsetFrac * lngSpan * 0.75;
+    const offsetFrac = (i - 3) * 0.28;
+    const offsetLat = centerLat + offsetFrac * latSpan * 0.9;
+    const offsetLng = centerLng + offsetFrac * lngSpan * 0.85;
 
-    const lengthDeg = Math.max(latSpan, lngSpan) * 1.35;
-    const numPoints = 9;
+    const lengthDeg = Math.max(latSpan, lngSpan) * 2.4;
+    const numPoints = 11;
     const lineamentCoords: [number, number][] = [];
 
     for (let p = 0; p < numPoints; p++) {
       const t = (p / (numPoints - 1)) - 0.5;
       const lat = offsetLat + t * lengthDeg * Math.cos(angle);
       const lng = offsetLng + t * lengthDeg * Math.sin(angle);
-      const sinWiggle = Math.sin(p * 1.8 + i) * (latSpan * 0.022);
-      lineamentCoords.push([lat + sinWiggle, lng + sinWiggle]);
+      const sinWiggle = Math.sin(p * 1.6 + i) * (latSpan * 0.025);
+      lineamentCoords.push([lat + sinWiggle, lng - sinWiggle * 0.7]);
     }
 
-    const isPalaeo = i === 2;
+    const isPalaeo = i === 2 || i === 5;
+    const azimuthDeg = Math.round(((angle * 180) / Math.PI + 360) % 360);
     pathways.push({
       id: `lineament-corridor-${pathwayCounter++}`,
       type: isPalaeo ? 'palaeochannel' : 'inferred_fracture',
-      streamOrder: 2,
+      streamOrder: 1,
       coordinates: lineamentCoords,
-      confidence: i < 4 ? 'High' : 'Moderate',
-      flowAccumulationScore: 32 + i * 5,
+      confidence: i < 5 ? 'High' : 'Moderate',
+      flowAccumulationScore: 38 + i * 5,
       flowVelocityMPerDay: isPalaeo ? 1.55 : 0.95,
       hydraulicGradient: 0.012,
       depthToWaterM: isPalaeo ? 4.5 : 6.8,
       darcyFluxM3PerDay: isPalaeo ? 340 : 195,
-      flowDirectionDeg: Math.round(((angle * 180) / Math.PI + 360) % 360),
+      flowDirectionDeg: azimuthDeg,
       description: isPalaeo
-        ? 'Buried palaeochannel aquifer corridor with deep alluvial gravel fill, multi-layered storage, and high secondary transmissivity.'
-        : `Tectonic structural fracture / shear corridor (Azimuth ${Math.round(((angle * 180) / Math.PI + 360) % 360)}°) with enhanced fracture permeability.`,
+        ? 'Buried palaeochannel aquifer corridor with deep alluvial gravel fill, multi-layered storage, and high secondary transmissivity. (Inferred from DEM/satellite — verify via VES).'
+        : `Tectonic structural lineament & fractured-rock corridor (Azimuth ${azimuthDeg}°) conveying secondary fracture permeability. (Hypothesis requiring field verification).`,
     });
 
-    // Conjugate micro-fractures and splay joints feeding into fracture corridor
-    const splayFeeders = createDendriticFeeders(
-      lineamentCoords,
-      2,
-      isPalaeo ? 'subsurface_flow' : 'sub_pathway',
-      Math.max(latSpan, lngSpan) * 0.12
-    );
-    pathways.push(...splayFeeders);
+    // Conjugate fracture splays & feather joints branching off the main lineament corridor (also dashed cyan)
+    for (let k = 2; k < lineamentCoords.length - 2; k += 2) {
+      const pCurr = lineamentCoords[k];
+      const pNext = lineamentCoords[k + 1];
+      const dLat = pNext[0] - pCurr[0];
+      const dLng = pNext[1] - pCurr[1];
+      const mag = Math.hypot(dLat, dLng);
+      if (mag < 1e-6) continue;
+
+      const splaySign = k % 4 === 0 ? 1 : -1;
+      const splayAngle = angle + splaySign * (38 * Math.PI / 180);
+      const splayLen = Math.max(latSpan, lngSpan) * 0.42;
+      const splayCoords: [number, number][] = [
+        [pCurr[0], pCurr[1]],
+        [
+          pCurr[0] + 0.5 * splayLen * Math.cos(splayAngle),
+          pCurr[1] + 0.5 * splayLen * Math.sin(splayAngle),
+        ],
+        [
+          pCurr[0] + splayLen * Math.cos(splayAngle) + Math.sin(k) * (latSpan * 0.015),
+          pCurr[1] + splayLen * Math.sin(splayAngle) - Math.cos(k) * (lngSpan * 0.015),
+        ],
+      ];
+
+      pathways.push({
+        id: `fracture-splay-${pathwayCounter++}`,
+        type: 'inferred_fracture',
+        streamOrder: 2,
+        coordinates: splayCoords,
+        confidence: 'Moderate',
+        flowAccumulationScore: 24 + (k % 5) * 2,
+        flowVelocityMPerDay: 0.72,
+        hydraulicGradient: 0.013,
+        depthToWaterM: 7.4,
+        darcyFluxM3PerDay: 125,
+        flowDirectionDeg: Math.round(((splayAngle * 180) / Math.PI + 360) % 360),
+        description: `Secondary conjugate fracture splay branching off main lineament at ~38° shear angle. Acts as lateral fractured-rock collector.`,
+      });
+    }
   }
 
   const meanSlopeDeg = Math.round((totalSlope / ((gridSize - 2) * (gridSize - 2))) * 10) / 10;
-  const drainageDensityKmPerSqKm = Math.round((pathways.length * 0.85) * 10) / 10;
   const meanWaterTableDepthM = Math.round((totalWaterTableDepth / (gridSize * gridSize)) * 10) / 10;
   const meanHydraulicGradient = gradCount > 0 ? Math.round((totalHydraulicGrad / gradCount) * 1000) / 1000 : 0.014;
   const regionalFlowDirectionDeg = Math.round((valleyAngleRad * 180 / Math.PI + 180) % 360);
+
+  // 8. Dense dendritic subsurface flow network (streamlines through the head field)
+  //    replaces the coarse D8 branches for display and ranking; structural
+  //    lineaments and the palaeochannel corridor are retained.
+  const dendriticNetwork = buildSubsurfaceDendriticNetwork(elevationGrid, centerLat, centerLng, seed);
+  const structuralCorridors = pathways.filter(p => p.type === 'inferred_fracture' || p.type === 'palaeochannel');
+  const finalPathways: BranchingPathway[] = [...dendriticNetwork, ...structuralCorridors];
+
+  // 9. Equipotential (hydraulic head) contours
+  const headContours = computeHeadContours(elevationGrid);
+
+  // Drainage density = total network length / domain area (km per km²)
+  const segKm = (a: [number, number], b: [number, number]) =>
+    Math.hypot((b[0] - a[0]) * 111.32, (b[1] - a[1]) * 111.32 * Math.cos((centerLat * Math.PI) / 180));
+  const totalKm = dendriticNetwork.reduce(
+    (sum, p) => sum + p.coordinates.slice(1).reduce((s, pt, i) => s + segKm(p.coordinates[i], pt), 0),
+    0
+  );
+  const domainKm2 =
+    (endLat - startLat) * 111.32 * (endLng - startLng) * 111.32 * Math.cos((centerLat * Math.PI) / 180);
+  const drainageDensityKmPerSqKm = Math.round((totalKm / Math.max(domainKm2, 1e-6)) * 10) / 10;
 
   return {
     elevationGrid,
     minElevation,
     maxElevation,
     meanSlopeDeg,
-    pathways,
+    pathways: finalPathways,
     drainageDensityKmPerSqKm,
     meanWaterTableDepthM,
     meanHydraulicGradient,
     regionalFlowDirectionDeg,
     dominantFlowRegime: 'Gravity-Driven Tectonic Fracture & Multi-Tier Deltaic Interflow',
-    subsurfacePathwaysCount: pathways.filter(p => p.type === 'subsurface_flow' || p.type === 'palaeochannel' || p.type === 'inferred_fracture').length,
+    subsurfacePathwaysCount: finalPathways.length,
+    headContours,
   };
 }
